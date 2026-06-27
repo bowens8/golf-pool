@@ -386,13 +386,21 @@ var liveError=null;
 function defaultState(){
   return { players:[], golfers:[], picks:[], view:'setup' };
 }
+function normalizeState(s){
+  if(!s) s={};
+  if(!Array.isArray(s.players)) s.players=[];
+  if(!Array.isArray(s.golfers)) s.golfers=[];
+  if(!Array.isArray(s.picks)) s.picks=[];
+  if(!s.view) s.view='setup';
+  return s;
+}
 
 function loadState(){
   try{
     var raw=localStorage.getItem(STORAGE_KEY);
     if(raw){ state=JSON.parse(raw); }
   }catch(e){}
-  if(!state || !state.players) state=defaultState();
+  state=normalizeState(state);
 }
 function saveState(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
@@ -415,11 +423,11 @@ function initFirebase(){
         suppressNextWrite=false;
         return;
       }
-      if(remote && remote.players){
-        state=remote;
+      if(remote){
+        state=normalizeState(remote);
         try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
         render();
-      } else if(!remote){
+      } else {
         dbRef.set(state);
       }
     }, function(err){
@@ -765,6 +773,7 @@ initFirebase();
 render();
 fetchLiveScores();
 setInterval(fetchLiveScores, REFRESH_MS);
+setTimeout(function(){ saveState(); }, 1500);
 })();
 </script>
 </body>
