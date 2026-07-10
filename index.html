@@ -914,7 +914,7 @@ function renderSetup(app){
     wrow2.appendChild(wlabel2); wrow2.appendChild(winput2);
     wcard.appendChild(wrow2);
     var wtotal=(state.wagerWinner+state.wagerScore);
-    wcard.appendChild(el('p',{class:'small-muted',style:'margin-top:8px',text:'Each player puts in $'+wtotal+' total. Winner pot: $'+(state.wagerWinner*state.numPlayers)+'. Score pot: $'+(state.wagerScore*state.numPlayers)+'. If a pot has no winner (e.g. nobody drafted the tournament champion), that pot is absolved — nobody collects it.'}));
+    wcard.appendChild(el('p',{class:'small-muted',style:'margin-top:8px',text:'Each player puts in $'+wtotal+' total. Winner pot: $'+(state.wagerWinner*state.numPlayers)+'. Score pot: $'+(state.wagerScore*state.numPlayers)+'. If a pot has no qualifying winner (e.g. nobody drafted the tournament champion), that wager is voided — everyone keeps their own stake for it, nobody collects extra.'}));
     app.appendChild(wcard);
   } else {
     var roCard=el('div',{class:'card'});
@@ -1067,16 +1067,11 @@ function renderDraft(app){
       app.appendChild(btn('Undo last alt pick',function(){ var lastAltPlayer=altOrder[altsPickedSoFar-1]; delete state.alts[state.players[lastAltPlayer]]; saveState(); render(); },'full'));
     }
   }
-
-  // Alternates management card
-  if(Object.keys(state.alts).length>0){
-    renderAltsCard(app);
-  }
 }
 
 function renderAltsCard(app){
   var card=el('div',{class:'alt-card'});
-  card.appendChild(el('label',{class:'field-label',text:'Alternates'}));
+  card.appendChild(el('label',{class:'field-label',text:'Alternates \u2014 mark a golfer withdrawn'}));
   if(!isCommissioner){
     card.appendChild(el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Only the commissioner can activate an alt (when a golfer withdraws or is injured before the tournament begins).'}));
   }
@@ -1178,6 +1173,11 @@ function renderLeaderboard(app){
   if(drafted.length===0){
     app.appendChild(el('p',{class:'small-muted',text:'Draft golfers first to see the leaderboard.'}));
     return;
+  }
+
+  // Alternates management — commissioner marks a golfer withdrawn/injured to bring in the alt
+  if(Object.keys(state.alts).length>0){
+    renderAltsCard(app);
   }
 
   // Live status bar
@@ -1332,15 +1332,21 @@ function renderMoney(app){
     scoreLeaders=results.filter(function(r){ return r.total===best; }).map(function(r){ return r.player; });
   }
 
-  // Build per-player money summary. If nobody qualifies for a pot, it's absolved — no one collects it.
+  // Build per-player money summary. If nobody qualifies for a pot, that pot is voided —
+  // each player's stake for THAT pot is refunded (a wash), not lost. Nobody collects extra,
+  // but nobody loses their buy-in for a bet no one could win.
+  var winnerPotHasWinner=winnerOwners.length>0;
+  var scorePotHasWinner=scoreLeaders.length>0;
   var summary=state.players.map(function(p){
     var paid=state.wagerWinner+state.wagerScore;
     var winnerShare=0;
-    if(winnerOwners.length&&winnerOwners.indexOf(p)>-1) winnerShare=winnerPot/winnerOwners.length;
+    if(winnerPotHasWinner&&winnerOwners.indexOf(p)>-1) winnerShare=winnerPot/winnerOwners.length;
+    var winnerRefund=winnerPotHasWinner?0:state.wagerWinner;
     var scoreShare=0;
-    if(scoreLeaders.length&&scoreLeaders.indexOf(p)>-1) scoreShare=scorePot/scoreLeaders.length;
-    var net=(winnerShare+scoreShare)-paid;
-    return {player:p,paid:paid,winnerShare:winnerShare,scoreShare:scoreShare,net:net};
+    if(scorePotHasWinner&&scoreLeaders.indexOf(p)>-1) scoreShare=scorePot/scoreLeaders.length;
+    var scoreRefund=scorePotHasWinner?0:state.wagerScore;
+    var net=(winnerShare+winnerRefund+scoreShare+scoreRefund)-paid;
+    return {player:p,paid:paid,winnerShare:winnerShare,winnerRefund:winnerRefund,scoreShare:scoreShare,scoreRefund:scoreRefund,net:net};
   });
 
   // Summary header
@@ -1358,7 +1364,7 @@ function renderMoney(app){
   potRow3.appendChild(el('span',{style:'font-weight:600',text:'Total pool'}));
   potRow3.appendChild(el('span',{class:'money-amount neutral',style:'font-weight:600',text:'$'+totalPot}));
   hcard.appendChild(potRow3);
-  hcard.appendChild(el('p',{class:'money-split-note',text:'If a pot has no qualifying winner, it\u2019s absolved \u2014 nobody collects it.'}));
+  hcard.appendChild(el('p',{class:'money-split-note',text:'If a pot has no qualifying winner, that wager is voided \u2014 everyone keeps their stake for it, nobody collects extra.'}));
   app.appendChild(hcard);
 
   // Current leader status
@@ -1388,6 +1394,18 @@ function renderMoney(app){
     r1.appendChild(el('span',{text:'Amount wagered',style:'color:var(--ink-soft)'}));
     r1.appendChild(el('span',{text:'-$'+s.paid,style:'color:var(--ink-soft)'}));
     card.appendChild(r1);
+    if(s.winnerRefund>0){
+      var rw=el('div',{class:'money-row',style:'font-size:13px'});
+      rw.appendChild(el('span',{text:'Winner pot voided (no qualifying winner)',style:'color:var(--ink-soft)'}));
+      rw.appendChild(el('span',{text:'+$'+s.winnerRefund.toFixed(0),style:'color:var(--ink-soft)'}));
+      card.appendChild(rw);
+    }
+    if(s.scoreRefund>0){
+      var rs=el('div',{class:'money-row',style:'font-size:13px'});
+      rs.appendChild(el('span',{text:'Score pot voided (no qualifying winner)',style:'color:var(--ink-soft)'}));
+      rs.appendChild(el('span',{text:'+$'+s.scoreRefund.toFixed(0),style:'color:var(--ink-soft)'}));
+      card.appendChild(rs);
+    }
     if(s.winnerShare>0){
       var r2=el('div',{class:'money-row',style:'font-size:13px'});
       r2.appendChild(el('span',{text:'Tournament winner pot'+(winnerOwners.length>1?' (split)':''),style:'color:#1a5c2e'}));
