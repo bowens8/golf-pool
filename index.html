@@ -1175,11 +1175,6 @@ function renderLeaderboard(app){
     return;
   }
 
-  // Alternates management — commissioner marks a golfer withdrawn/injured to bring in the alt
-  if(Object.keys(state.alts).length>0){
-    renderAltsCard(app);
-  }
-
   // Live status bar
   var liveBar=el('div',{class:'row-flex',style:'margin-bottom:10px;justify-content:space-between'});
   var ltag=el('span',{class:'live-tag'});
@@ -1309,6 +1304,11 @@ function renderLeaderboard(app){
   });
   manCard.appendChild(mlist);
   app.appendChild(manCard);
+
+  // Alternates management — commissioner marks a golfer withdrawn/injured to bring in the alt
+  if(Object.keys(state.alts).length>0){
+    renderAltsCard(app);
+  }
 }
 
 function renderMoney(app){
