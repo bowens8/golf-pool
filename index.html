@@ -323,6 +323,88 @@
     margin-left:4px;
     vertical-align:middle;
   }
+  .cut-x{
+    color:#b0413e;
+    font-size:15px;
+    font-weight:700;
+    min-width:36px;
+    text-align:right;
+  }
+  .cut-name{
+    text-decoration:line-through;
+    color:#b0413e;
+    opacity:0.7;
+  }
+  .cut-toggle-btn{
+    font-size:10px;
+    padding:2px 7px;
+    border-radius:3px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--ink-soft);
+    cursor:pointer;
+    margin-left:6px;
+    flex-shrink:0;
+  }
+  .cut-toggle-btn.is-cut{
+    border-color:#b0413e;
+    color:#b0413e;
+    background:#fff5f5;
+  }
+  .money-card{
+    background:#fff;
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:1rem 1.1rem;
+    margin-bottom:0.9rem;
+  }
+  .money-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:8px 2px;
+    border-bottom:1px solid var(--line);
+    font-size:15px;
+  }
+  .money-row:last-child{border-bottom:none;}
+  .money-amount{
+    font-family:'Playfair Display',serif;
+    font-size:17px;
+    font-weight:600;
+  }
+  .money-amount.positive{color:#1a5c2e;}
+  .money-amount.negative{color:#b0413e;}
+  .money-amount.neutral{color:var(--ink-soft);}
+  .money-pot-label{
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin:0 0 10px;
+    display:block;
+  }
+  .money-split-note{
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-top:4px;
+  }
+  .commish-btn{
+    font-family:'EB Garamond',serif;
+    font-size:11px;
+    letter-spacing:0.06em;
+    padding:4px 10px;
+    border-radius:4px;
+    border:1px solid rgba(255,255,255,0.4);
+    background:rgba(255,255,255,0.12);
+    color:#fff;
+    cursor:pointer;
+  }
+  .commish-btn.active{
+    background:var(--masters-gold);
+    border-color:var(--masters-gold);
+    color:var(--masters-green-dark);
+    font-weight:600;
+  }
   .small-muted{
     font-size:12.5px;
     color:var(--ink-soft);
@@ -393,6 +475,7 @@
   <p class="eyebrow">A tradition unlike any other</p>
   <h1>The Pool</h1>
   <p class="sub">PGA Tour fantasy snake draft</p>
+  <div id="commish-bar" style="position:absolute;top:12px;right:12px;"></div>
 </header>
 
 <div class="wrap">
@@ -403,8 +486,6 @@
 <script>
 (function(){
 var STORAGE_KEY='masters_pool_v1';
-var ROSTER_SIZE=10;
-var NUM_PLAYERS=4;
 var MAX_GOLFERS=150;
 var ESPN_URL='https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard';
 var REFRESH_MS=60000;
@@ -419,6 +500,9 @@ var FIREBASE_CONFIG = {
 var ROOM_ID = "default-pool";
 // ---------------------------------------------------------------------------
 
+var COMMISSIONER_PASSWORD = 'buns';
+var isCommissioner = false;
+
 var firebaseReady = FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.indexOf('YOUR_')!==0;
 var dbRef=null;
 var syncConnected=false;
@@ -432,13 +516,22 @@ var liveFetchedAt=null;
 var liveError=null;
 
 function defaultState(){
-  return { players:[], golfers:[], picks:[], view:'setup' };
+  return { players:[], golfers:[], picks:[], cuts:{}, alts:{}, altActive:{}, locked:false, wagerWinner:25, wagerScore:25, numPlayers:4, rosterSize:10, topScores:5, view:'setup' };
 }
 function normalizeState(s){
   if(!s) s={};
   if(!Array.isArray(s.players)) s.players=[];
   if(!Array.isArray(s.golfers)) s.golfers=[];
   if(!Array.isArray(s.picks)) s.picks=[];
+  if(!s.cuts || typeof s.cuts!=='object' || Array.isArray(s.cuts)) s.cuts={};
+  if(!s.alts || typeof s.alts!=='object' || Array.isArray(s.alts)) s.alts={};
+  if(!s.altActive || typeof s.altActive!=='object' || Array.isArray(s.altActive)) s.altActive={};
+  if(typeof s.locked!=='boolean') s.locked=false;
+  if(typeof s.wagerWinner!=='number') s.wagerWinner=25;
+  if(typeof s.wagerScore!=='number') s.wagerScore=25;
+  if(typeof s.numPlayers!=='number'||s.numPlayers<2) s.numPlayers=4;
+  if(typeof s.rosterSize!=='number'||s.rosterSize<1) s.rosterSize=10;
+  if(typeof s.topScores!=='number'||s.topScores<1) s.topScores=5;
   if(!s.view) s.view='setup';
   return s;
 }
@@ -522,9 +615,31 @@ function snakeOrder(numPlayers, rounds){
 
 function draftedNames(){ return state.picks.map(function(p){ return p.golfer; }); }
 
+function renderCommishBar(){
+  var bar=document.getElementById('commish-bar');
+  if(!bar) return;
+  bar.innerHTML='';
+  if(isCommissioner){
+    var b=el('button',{type:'button',class:'commish-btn active',text:'\uD83D\uDD12 Commish'});
+    b.addEventListener('click',function(){
+      if(confirm('Log out of commissioner mode?')){ isCommissioner=false; render(); }
+    });
+    bar.appendChild(b);
+  } else {
+    var b2=el('button',{type:'button',class:'commish-btn',text:'Commish login'});
+    b2.addEventListener('click',function(){
+      var pw=prompt('Commissioner password:');
+      if(pw===COMMISSIONER_PASSWORD){ isCommissioner=true; render(); alert('Welcome, Commissioner.'); }
+      else if(pw!==null){ alert('Wrong password.'); }
+    });
+    bar.appendChild(b2);
+  }
+}
+
 function render(){
   var app=document.getElementById('app');
   app.innerHTML='';
+  renderCommishBar();
   if(!firebaseReady){
     var warn=el('div',{class:'config-banner'});
     warn.innerHTML='Live sync isn\u2019t set up yet \u2014 this device is only saving to itself. Add your Firebase config in <code>index.html</code> (see setup steps) to make everyone see the same draft and scores.';
@@ -554,7 +669,7 @@ function renderTabs(app){
 
 function renderSetup(app){
   var card=el('div',{class:'card'});
-  card.appendChild(el('label',{class:'field-label',text:'Players ('+state.players.length+'/'+NUM_PLAYERS+')'}));
+  card.appendChild(el('label',{class:'field-label',text:'Players ('+state.players.length+'/'+state.numPlayers+')'}));
   state.players.forEach(function(p,i){
     var row=el('div',{class:'list-row'});
     row.appendChild(el('span',{text:p}));
@@ -563,7 +678,7 @@ function renderSetup(app){
     row.appendChild(x);
     card.appendChild(row);
   });
-  if(state.players.length<NUM_PLAYERS){
+  if(state.players.length<state.numPlayers){
     var prow=el('div',{class:'row-flex',style:'margin-top:8px'});
     var pinput=el('input',{type:'text',placeholder:'Player name'});
     var paddbtn=btn('Add',function(){
@@ -577,7 +692,59 @@ function renderSetup(app){
   app.appendChild(card);
 
   var gcard=el('div',{class:'card'});
-  gcard.appendChild(el('label',{class:'field-label',text:'Golfer pool ('+state.golfers.length+' / min '+(ROSTER_SIZE*NUM_PLAYERS)+', max '+MAX_GOLFERS+')'}));
+  gcard.appendChild(el('label',{class:'field-label',text:'Golfer pool ('+state.golfers.length+' / min '+(state.rosterSize*state.numPlayers)+', max '+MAX_GOLFERS+')'}));
+
+  // Import from ESPN button
+  var importRow=el('div',{class:'row-flex',style:'margin-bottom:10px'});
+  var importBtn=btn('Import this week\'s field from ESPN',function(){
+    importBtn.textContent='Importing\u2026';
+    importBtn.disabled=true;
+    fetch(ESPN_URL)
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        var ev=data.events&&data.events[0];
+        var comp=ev&&ev.competitions&&ev.competitions[0];
+        var competitors=comp&&comp.competitors||[];
+        if(!competitors.length){
+          importStatus.textContent='No field found — try again closer to tournament start.';
+          importStatus.style.color='var(--danger)';
+          importBtn.textContent='Import this week\'s field from ESPN';
+          importBtn.disabled=false;
+          return;
+        }
+        var added=0;
+        var skipped=0;
+        competitors.forEach(function(c){
+          var nm=c.athlete&&(c.athlete.displayName||c.athlete.fullName);
+          if(!nm) return;
+          nm=nm.trim();
+          if(state.golfers.indexOf(nm)===-1 && state.golfers.length<MAX_GOLFERS){
+            state.golfers.push(nm);
+            added++;
+          } else {
+            skipped++;
+          }
+        });
+        saveState();
+        var evName=ev.name||'current event';
+        importStatus.textContent='Imported '+added+' golfer(s) from '+evName+(skipped?' ('+skipped+' already in pool or pool full)':'')+'.'  ;
+        importStatus.style.color='var(--masters-green)';
+        importBtn.textContent='Re-import / refresh field';
+        importBtn.disabled=false;
+        render();
+      })
+      .catch(function(){
+        importStatus.textContent='Could not reach ESPN. Check your connection and try again.';
+        importStatus.style.color='var(--danger)';
+        importBtn.textContent='Import this week\'s field from ESPN';
+        importBtn.disabled=false;
+      });
+  },'primary');
+  importRow.appendChild(importBtn);
+  gcard.appendChild(importRow);
+  var importStatus=el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Pulls the current PGA Tour field from ESPN. Works best once the field is set (Tue–Sun of tournament week).'});
+  gcard.appendChild(importStatus);
+
   var glist=el('div',{class:'scrolly'});
   state.golfers.forEach(function(g,i){
     var row=el('div',{class:'list-row'});
@@ -590,7 +757,7 @@ function renderSetup(app){
   gcard.appendChild(glist);
   if(state.golfers.length<MAX_GOLFERS){
     var grow=el('div',{class:'row-flex',style:'margin-top:8px'});
-    var ginput=el('input',{type:'text',placeholder:'Golfer name, e.g. Scottie Scheffler'});
+    var ginput=el('input',{type:'text',placeholder:'Add golfer manually'});
     var gaddbtn=btn('Add',function(){
       var v=ginput.value.trim();
       if(v && state.golfers.indexOf(v)===-1 && state.golfers.length<MAX_GOLFERS){ state.golfers.push(v); saveState(); ginput.value=''; render(); ginput.focus(); }
@@ -601,90 +768,254 @@ function renderSetup(app){
   } else {
     gcard.appendChild(el('p',{class:'small-muted',text:'Pool is full at '+MAX_GOLFERS+' golfers. Remove one to add another.'}));
   }
+  if(state.golfers.length>0){
+    var clearBtn=btn('Clear all golfers',function(){
+      if(confirm('Remove all '+state.golfers.length+' golfers from the pool?')){ state.golfers=[]; saveState(); render(); }
+    },'danger full');
+    clearBtn.style.marginTop='8px';
+    gcard.appendChild(clearBtn);
+  }
   app.appendChild(gcard);
 
-  var canStart = state.players.length===NUM_PLAYERS && state.golfers.length>=ROSTER_SIZE*NUM_PLAYERS;
-  if(canStart && state.picks.length===0){
-    app.appendChild(btn('Start snake draft',function(){ state.view='draft'; saveState(); render(); },'primary full'));
-  } else if(!canStart){
-    var need=Math.max(0, ROSTER_SIZE*NUM_PLAYERS-state.golfers.length);
-    var msg = state.players.length<NUM_PLAYERS ? ('Add '+(NUM_PLAYERS-state.players.length)+' more player(s).') : (need>0 ? ('Add '+need+' more golfer(s) — need '+(ROSTER_SIZE*NUM_PLAYERS)+' total for '+ROSTER_SIZE+' picks per player.') : '');
-    if(msg) app.appendChild(el('p',{class:'small-muted',text:msg}));
+  // Pool settings
+  var scard=el('div',{class:'card'});
+  scard.appendChild(el('label',{class:'field-label',text:'Pool settings'}));
+
+  function settingRow(labelText, value, min, max, onChange){
+    var row=el('div',{class:'row-flex',style:'margin-bottom:10px'});
+    row.appendChild(el('span',{text:labelText,style:'flex:1;font-size:14px'}));
+    var wrap=el('div',{class:'row-flex',style:'gap:0'});
+    var dn=el('button',{type:'button',class:'btn',style:'padding:6px 12px;border-radius:5px 0 0 5px;border-right:none'});
+    dn.textContent='−';
+    var display=el('span',{style:'min-width:36px;text-align:center;font-size:16px;font-family:\'Playfair Display\',serif;padding:0 4px;border:1px solid var(--line);border-left:none;border-right:none;display:flex;align-items:center;justify-content:center'});
+    display.textContent=value;
+    var up=el('button',{type:'button',class:'btn',style:'padding:6px 12px;border-radius:0 5px 5px 0;border-left:none'});
+    up.textContent='+';
+    dn.addEventListener('click',function(){ onChange(Math.max(min,value-1)); });
+    up.addEventListener('click',function(){ onChange(Math.min(max,value+1)); });
+    wrap.appendChild(dn); wrap.appendChild(display); wrap.appendChild(up);
+    row.appendChild(wrap);
+    return row;
   }
 
-  if(state.picks.length>0){
-    app.appendChild(btn('Reset everything',function(){
-      if(confirm('This clears players, golfers, and picks. Continue?')){
-        state=defaultState(); saveState(); render();
-      }
-    },'danger full'));
+  scard.appendChild(settingRow('Players in pool', state.numPlayers, 2, 10, function(v){
+    if(v<state.players.length){ alert('Remove players first before reducing the pool size.'); return; }
+    state.numPlayers=v; saveState(); render();
+  }));
+  scard.appendChild(settingRow('Golfers per team', state.rosterSize, 1, 20, function(v){
+    if(v<state.topScores){ state.topScores=v; }
+    state.rosterSize=v; saveState(); render();
+  }));
+  scard.appendChild(settingRow('Top scores that count', state.topScores, 1, state.rosterSize, function(v){
+    state.topScores=v; saveState(); render();
+  }));
+  app.appendChild(scard);
+
+  // Wager amounts
+  var wcard=el('div',{class:'card'});
+  wcard.appendChild(el('label',{class:'field-label',text:'Wager amounts'}));
+  var wrow1=el('div',{class:'row-flex',style:'margin-bottom:10px'});
+  var wlabel1=el('span',{text:'$ per player — tournament winner:',style:'flex:1;font-size:14px'});
+  var winput1=el('input',{type:'number',min:'0',step:'1',style:'width:72px;text-align:right'});
+  winput1.value=state.wagerWinner;
+  winput1.addEventListener('change',function(){ var v=parseInt(this.value,10); if(!isNaN(v)&&v>=0){ state.wagerWinner=v; saveState(); } });
+  wrow1.appendChild(wlabel1); wrow1.appendChild(winput1);
+  wcard.appendChild(wrow1);
+  var wrow2=el('div',{class:'row-flex'});
+  var wlabel2=el('span',{text:'$ per player — lowest team score:',style:'flex:1;font-size:14px'});
+  var winput2=el('input',{type:'number',min:'0',step:'1',style:'width:72px;text-align:right'});
+  winput2.value=state.wagerScore;
+  winput2.addEventListener('change',function(){ var v=parseInt(this.value,10); if(!isNaN(v)&&v>=0){ state.wagerScore=v; saveState(); } });
+  wrow2.appendChild(wlabel2); wrow2.appendChild(winput2);
+  wcard.appendChild(wrow2);
+  var wtotal=(state.wagerWinner+state.wagerScore);
+  wcard.appendChild(el('p',{class:'small-muted',style:'margin-top:8px',text:'Each player puts in $'+wtotal+' total. Winner pot: $'+(state.wagerWinner*state.numPlayers)+'. Score pot: $'+(state.wagerScore*state.numPlayers)+'.'}));
+  app.appendChild(wcard);
+
+  var canStart = state.players.length===state.numPlayers && state.golfers.length>=state.rosterSize*state.numPlayers;
+  var draftDone = state.picks.length>=state.rosterSize*state.numPlayers && Object.keys(state.alts).length>=state.numPlayers;
+
+  if(state.locked){
+    var lockBanner=el('div',{style:'background:var(--masters-green);color:#fff;border-radius:6px;padding:0.9rem 1rem;margin-bottom:0.8rem;text-align:center'});
+    lockBanner.appendChild(el('p',{style:'margin:0 0 4px;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--masters-gold-light)',text:'Tournament in progress'}));
+    lockBanner.appendChild(el('p',{style:'margin:0;font-family:\'Playfair Display\',serif;font-size:18px',text:'Teams are locked \uD83D\uDD12'}));
+    app.appendChild(lockBanner);
+    if(isCommissioner){
+      app.appendChild(btn('Unlock teams',function(){
+        if(confirm('Unlock teams? This allows picks and roster changes.')){ state.locked=false; saveState(); render(); }
+      },'full'));
+    }
+  } else {
+    if(canStart && state.picks.length===0){
+      app.appendChild(btn('Start snake draft',function(){ state.view='draft'; saveState(); render(); },'primary full'));
+    } else if(!canStart){
+      var need=Math.max(0, state.rosterSize*state.numPlayers-state.golfers.length);
+      var msg = state.players.length<state.numPlayers ? ('Add '+(state.numPlayers-state.players.length)+' more player(s).') : (need>0 ? ('Add '+need+' more golfer(s) — need '+(state.rosterSize*state.numPlayers)+' total for '+state.rosterSize+' picks per player.') : '');
+      if(msg) app.appendChild(el('p',{class:'small-muted',text:msg}));
+    }
+    if(isCommissioner && draftDone){
+      var lockBtn=btn('Lock teams \uD83D\uDD12 (tournament starting)',function(){
+        if(confirm('Lock all teams? No picks or roster changes will be allowed until you unlock. Do this Thursday morning.')){ state.locked=true; saveState(); render(); }
+      },'gold full');
+      lockBtn.style.marginTop='6px';
+      app.appendChild(lockBtn);
+    }
+    if(isCommissioner && state.picks.length>0){
+      var resetBtn=btn('Reset everything',function(){
+        if(confirm('This clears players, golfers, picks and alts. Continue?')){ state=defaultState(); saveState(); render(); }
+      },'danger full');
+      resetBtn.style.marginTop='6px';
+      app.appendChild(resetBtn);
+    }
   }
 }
 
 function renderDraft(app){
-  if(state.players.length<NUM_PLAYERS || state.golfers.length<ROSTER_SIZE*NUM_PLAYERS){
-    app.appendChild(el('p',{class:'small-muted',text:'Finish setup first — '+NUM_PLAYERS+' players and enough golfers.'}));
+  if(state.players.length<state.numPlayers || state.golfers.length<state.rosterSize*state.numPlayers){
+    app.appendChild(el('p',{class:'small-muted',text:'Finish setup first — '+state.numPlayers+' players and enough golfers.'}));
     return;
   }
-  var order=snakeOrder(NUM_PLAYERS,ROSTER_SIZE);
-  var idx=state.picks.length;
-  var totalPicks=order.length;
 
-  if(idx>=totalPicks){
-    app.appendChild(el('p',{class:'serif-head',html:'Draft complete.',style:'font-size:18px;margin:0 0 12px'}));
-  } else {
-    var onClockIdx=order[idx];
-    var round=Math.floor(idx/NUM_PLAYERS)+1;
-    var pickInRound=(idx%NUM_PLAYERS)+1;
+  // Lock banner
+  if(state.locked){
+    var lb=el('div',{style:'background:var(--masters-green);color:#fff;border-radius:6px;padding:0.8rem 1rem;margin-bottom:1rem;text-align:center'});
+    lb.appendChild(el('p',{style:'margin:0;font-family:\'Playfair Display\',serif;font-size:16px',text:'\uD83D\uDD12 Teams are locked — tournament is underway'}));
+    app.appendChild(lb);
+  }
+
+  var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
+  var mainDone=state.picks.length>=mainOrder.length;
+  var altsDone=Object.keys(state.alts).length>=state.numPlayers;
+  var allDone=mainDone&&altsDone;
+
+  // Alt order: one extra snake round continuing the pattern
+  var altOrder=snakeOrder(state.numPlayers,state.rosterSize+1).slice(state.numPlayers*state.rosterSize);
+  var altsPickedSoFar=Object.keys(state.alts).length;
+
+  var allTaken=draftedNames().concat(Object.values(state.alts));
+
+  if(allDone){
+    app.appendChild(el('p',{class:'serif-head',style:'font-size:18px;margin:0 0 12px',text:'Draft complete \u2714'}));
+  } else if(!mainDone && !state.locked){
+    // Main draft in progress
+    var idx=state.picks.length;
+    var onClockIdx=mainOrder[idx];
+    var round=Math.floor(idx/state.numPlayers)+1;
+    var pickInRound=(idx%state.numPlayers)+1;
     var pc=el('div',{class:'pick-card'});
     pc.appendChild(el('p',{class:'eyebrow',text:'Round '+round+' \u00b7 Pick '+pickInRound}));
     pc.appendChild(el('p',{class:'onclock',text:state.players[onClockIdx]+' is on the clock'}));
     app.appendChild(pc);
-
-    var taken=draftedNames();
-    var available=state.golfers.filter(function(g){ return taken.indexOf(g)===-1; });
+    var available=state.golfers.filter(function(g){ return allTaken.indexOf(g)===-1; });
     var card=el('div',{class:'card'});
     var search=el('input',{type:'text',placeholder:'Search golfer'});
     card.appendChild(search);
     var list=el('div',{class:'scrolly',style:'margin-top:8px'});
     card.appendChild(list);
     app.appendChild(card);
-
-    function renderList(filter){
+    function renderMainList(f){
       list.innerHTML='';
-      available.filter(function(g){ return g.toLowerCase().indexOf(filter.toLowerCase())>-1; }).forEach(function(g){
+      available.filter(function(g){ return g.toLowerCase().indexOf(f.toLowerCase())>-1; }).forEach(function(g){
         var b=el('button',{type:'button',class:'golfer-btn',text:g});
-        b.addEventListener('click',function(){
-          state.picks.push({player:state.players[onClockIdx], golfer:g});
-          saveState(); render();
-        });
+        b.addEventListener('click',function(){ state.picks.push({player:state.players[onClockIdx],golfer:g}); saveState(); render(); });
         list.appendChild(b);
       });
     }
-    renderList('');
-    search.addEventListener('input',function(){ renderList(search.value); });
+    renderMainList('');
+    search.addEventListener('input',function(){ renderMainList(search.value); });
+
+  } else if(mainDone && !altsDone && !state.locked){
+    // Alt round
+    var altIdx=altsPickedSoFar;
+    var altOnClockIdx=altOrder[altIdx];
+    var altPlayer=state.players[altOnClockIdx];
+    var pc2=el('div',{class:'pick-card'});
+    pc2.appendChild(el('p',{class:'eyebrow',text:'Alt round \u00b7 Pick '+(altIdx+1)}));
+    pc2.appendChild(el('p',{class:'onclock',text:altPlayer+' picks their alt'}));
+    var altNote=el('p',{style:'font-size:12px;color:var(--ink-soft);margin:4px 0 0',text:'Alt only counts if this player\'s golfer WDs before the tournament.'});
+    pc2.appendChild(altNote);
+    app.appendChild(pc2);
+    var available2=state.golfers.filter(function(g){ return allTaken.indexOf(g)===-1; });
+    var card2=el('div',{class:'card'});
+    var search2=el('input',{type:'text',placeholder:'Search golfer'});
+    card2.appendChild(search2);
+    var list2=el('div',{class:'scrolly',style:'margin-top:8px'});
+    card2.appendChild(list2);
+    app.appendChild(card2);
+    function renderAltList(f){
+      list2.innerHTML='';
+      available2.filter(function(g){ return g.toLowerCase().indexOf(f.toLowerCase())>-1; }).forEach(function(g){
+        var b=el('button',{type:'button',class:'golfer-btn',text:g});
+        b.addEventListener('click',function(){ state.alts[altPlayer]=g; saveState(); render(); });
+        list2.appendChild(b);
+      });
+    }
+    renderAltList('');
+    search2.addEventListener('input',function(){ renderAltList(search2.value); });
   }
 
+  // Rosters so far
   app.appendChild(el('label',{class:'field-label',text:'Rosters so far',style:'display:block;margin:14px 2px 8px'}));
   var grid=el('div',{class:'roster-grid'});
   state.players.forEach(function(p){
     var picksForP=state.picks.filter(function(pk){ return pk.player===p; }).map(function(pk){ return pk.golfer; });
     var rc=el('div',{class:'roster-card'});
-    rc.appendChild(el('p',{class:'pname',text:p+' ('+picksForP.length+'/'+ROSTER_SIZE+')'}));
+    rc.appendChild(el('p',{class:'pname',text:p+' ('+picksForP.length+'/'+state.rosterSize+')'}));
     picksForP.forEach(function(g){ rc.appendChild(el('p',{class:'gname',text:g})); });
+    if(state.alts[p]){
+      var altEl=el('p',{class:'gname',style:'color:var(--masters-gold);font-style:italic',text:'ALT: '+state.alts[p]+(state.altActive&&state.altActive[p]?' \u2605':'')});
+      rc.appendChild(altEl);
+    }
     grid.appendChild(rc);
   });
   app.appendChild(grid);
 
-  if(state.picks.length>0){
-    app.appendChild(btn('Undo last pick',function(){ state.picks.pop(); saveState(); render(); },'full',true));
+  if(!state.locked){
+    if(state.picks.length>0 && !mainDone){
+      app.appendChild(btn('Undo last pick',function(){ state.picks.pop(); saveState(); render(); },'full'));
+    } else if(mainDone && !altsDone && altsPickedSoFar>0){
+      app.appendChild(btn('Undo last alt pick',function(){ var lastAltPlayer=altOrder[altsPickedSoFar-1]; delete state.alts[state.players[lastAltPlayer]]; saveState(); render(); },'full'));
+    }
   }
 }
 
+function isCut(golferName){
+  return !!(state.cuts && state.cuts[normName(golferName)]);
+}
+function toggleCut(golferName){
+  var key=normName(golferName);
+  if(!state.cuts) state.cuts={};
+  if(state.cuts[key]) delete state.cuts[key];
+  else state.cuts[key]=true;
+  saveState(); render();
+}
+function ownerOf(golferName){
+  var pk=state.picks.find(function(pk){ return pk.golfer===golferName; });
+  return pk ? pk.player : '';
+}
+
 function scoreFor(golferName){
+  if(isCut(golferName)) return undefined;
   var key=normName(golferName);
   if(liveScores.hasOwnProperty(key)) return liveScores[key];
   return undefined;
+}
+
+// Compute team results respecting cuts (need 5 active to count)
+function teamResults(){
+  return state.players.map(function(p){
+    var picksForP=state.picks.filter(function(pk){ return pk.player===p; }).map(function(pk){ return pk.golfer; });
+    var active=picksForP.filter(function(g){ return !isCut(g); });
+    var cut=picksForP.filter(function(g){ return isCut(g); });
+    var scoredActive=active.map(function(g){ return {golfer:g,score:scoreFor(g),cut:false}; }).filter(function(x){ return x.score!==undefined; }).sort(function(a,b){ return a.score-b.score; });
+    var unscoredActive=active.filter(function(g){ return scoreFor(g)===undefined; }).map(function(g){ return {golfer:g,score:undefined,cut:false}; });
+    var cutList=cut.map(function(g){ return {golfer:g,score:undefined,cut:true}; });
+    var top5=scoredActive.slice(0,state.topScores);
+    var rest=scoredActive.slice(state.topScores).concat(unscoredActive).concat(cutList);
+    var hasEnough=active.length>=state.topScores;
+    var total=hasEnough ? top5.reduce(function(s,x){ return s+x.score; },0) : null;
+    return {player:p,top5:top5,rest:rest,total:total,hasEnough:hasEnough,scoredCount:scoredActive.length,activeCount:active.length};
+  });
 }
 
 function renderLeaderboard(app){
@@ -696,26 +1027,27 @@ function renderLeaderboard(app){
 
   // Live status bar
   var liveBar=el('div',{class:'row-flex',style:'margin-bottom:10px;justify-content:space-between'});
-  var tag=el('span',{class:'live-tag'});
-  tag.appendChild(el('span',{class:'live-dot'}));
-  var statusText = liveError ? 'Live scores unavailable' : (liveTournamentName ? (liveTournamentName + (liveStatus? ' \u00b7 '+liveStatus:'')) : 'Loading live scores\u2026');
-  tag.appendChild(document.createTextNode(' '+statusText));
-  liveBar.appendChild(tag);
+  var ltag=el('span',{class:'live-tag'});
+  ltag.appendChild(el('span',{class:'live-dot'}));
+  var statusText=liveError?'Live scores unavailable':(liveTournamentName?(liveTournamentName+(liveStatus?'\u00b7 '+liveStatus:'')):'Loading live scores\u2026');
+  ltag.appendChild(document.createTextNode(' '+statusText));
+  liveBar.appendChild(ltag);
   var refreshBtn=btn('Refresh',function(){ fetchLiveScores(true); },'');
-  refreshBtn.style.fontSize='12px';
-  refreshBtn.style.padding='5px 10px';
+  refreshBtn.style.fontSize='12px'; refreshBtn.style.padding='5px 10px';
   liveBar.appendChild(refreshBtn);
   app.appendChild(liveBar);
 
-  // Tournament leader banner
-  var draftedNormSet={};
-  drafted.forEach(function(g){ draftedNormSet[normName(g)]=true; });
+  // Build lookup of drafted norm names → owner
+  var draftedOwnerMap={};
+  drafted.forEach(function(g){ draftedOwnerMap[normName(g)]=ownerOf(g); });
   var allScored=Object.keys(liveScores).map(function(k){ return {key:k,score:liveScores[k]}; }).sort(function(a,b){ return a.score-b.score; });
+
+  // Tournament leader banner
   var lowest=allScored[0]||null;
   if(lowest){
     var leaderDisplayName=liveDisplayNames[lowest.key]||lowest.key;
     var owners=state.players.filter(function(p){
-      return state.picks.some(function(pk){ return pk.player===p && normName(pk.golfer)===lowest.key; });
+      return state.picks.some(function(pk){ return pk.player===p&&normName(pk.golfer)===lowest.key&&!isCut(pk.golfer); });
     });
     var banner=el('div',{class:'leader-banner'});
     banner.appendChild(el('p',{class:'eyebrow',text:'Leading the tournament'}));
@@ -730,97 +1062,191 @@ function renderLeaderboard(app){
     app.appendChild(banner);
   }
 
-  // ── CHANGE 1: Pool standings — show all golfers, bold top 5 ──
-  var results=state.players.map(function(p){
-    var picksForP=state.picks.filter(function(pk){ return pk.player===p; }).map(function(pk){ return pk.golfer; });
-    var allG=picksForP.map(function(g){ return {golfer:g,score:scoreFor(g)}; });
-    var scored=allG.filter(function(x){ return x.score!==undefined; }).sort(function(a,b){ return a.score-b.score; });
-    var unscored=allG.filter(function(x){ return x.score===undefined; });
-    var top5=scored.slice(0,5);
-    var rest=scored.slice(5).concat(unscored);
-    var total=top5.reduce(function(s,x){ return s+x.score; },0);
-    return {player:p,top5:top5,rest:rest,total:total,countedAll:scored.length>=5,scoredCount:scored.length,rosterCount:picksForP.length};
-  });
-  results.sort(function(a,b){
-    if(a.scoredCount===0&&b.scoredCount===0) return 0;
-    if(a.scoredCount===0) return 1;
-    if(b.scoredCount===0) return -1;
-    return a.total-b.total;
-  });
-
-  app.appendChild(el('label',{class:'field-label',text:'Pool standings (lowest top-5 total wins)',style:'display:block;margin:14px 2px 8px'}));
-  results.forEach(function(r,i){
-    var card=el('div',{class:'lb-card'+(i===0&&r.scoredCount>0?' first':'')});
-    var head=el('div',{class:'lb-head'});
-    head.appendChild(el('span',{class:'lb-rank',text:(i+1)+'. '+r.player}));
-    var totalText=r.scoredCount===0?'\u2014':((r.total>0?'+':'')+r.total+(r.countedAll?'':' *'));
-    head.appendChild(el('span',{class:'lb-total',text:totalText}));
-    card.appendChild(head);
-    // bold top 5
-    r.top5.forEach(function(x){
-      var row=el('div',{class:'lb-roster-row counts'});
-      row.appendChild(el('span',{text:x.golfer}));
-      row.appendChild(el('span',{class:'gscore',text:(x.score>0?'+':'')+x.score}));
-      card.appendChild(row);
-    });
-    // rest not bold
-    r.rest.forEach(function(x){
-      var row=el('div',{class:'lb-roster-row'});
-      row.appendChild(el('span',{text:x.golfer}));
-      row.appendChild(el('span',{class:'gscore',text:x.score===undefined?'\u2014':((x.score>0?'+':'')+x.score)}));
-      card.appendChild(row);
-    });
-    app.appendChild(card);
-  });
-  if(results.some(function(r){ return !r.countedAll&&r.scoredCount>0; })){
-    app.appendChild(el('p',{class:'small-muted',text:'* fewer than 5 golfers scored yet — total reflects only those counted'}));
-  }
-
-  // ── CHANGE 2: Drafted golfers sorted by score ──
-  var sortedDrafted=drafted.map(function(g){ return {golfer:g,score:scoreFor(g)}; })
-    .sort(function(a,b){
-      if(a.score===undefined&&b.score===undefined) return 0;
-      if(a.score===undefined) return 1;
-      if(b.score===undefined) return -1;
-      return a.score-b.score;
-    });
-  var manCard=el('div',{class:'card'});
-  manCard.appendChild(el('label',{class:'field-label',text:'All drafted golfers (by score)'}));
-  var mlist=el('div',{class:'scrolly'});
-  sortedDrafted.forEach(function(x){
-    var owner=state.players.find(function(p){ return state.picks.some(function(pk){ return pk.player===p&&pk.golfer===x.golfer; }); })||'';
-    var row=el('div',{class:'gscore-row'});
-    var nameWrap=el('span');
-    nameWrap.appendChild(document.createTextNode(x.golfer));
-    var ownerSpan=el('span',{style:'font-size:11px;color:var(--ink-soft);margin-left:6px;'});
-    ownerSpan.textContent='('+owner+')';
-    nameWrap.appendChild(ownerSpan);
-    row.appendChild(nameWrap);
-    row.appendChild(el('span',{class:'sc',text:x.score===undefined?'\u2014':((x.score>0?'+':'')+x.score)}));
-    mlist.appendChild(row);
-  });
-  manCard.appendChild(mlist);
-  app.appendChild(manCard);
-
-  // ── CHANGE 3: Live tournament leaderboard (top 25) ──
+  // ── Live tournament leaderboard (top 25) — moved here, below banner ──
   if(allScored.length>0){
     var tnCard=el('div',{class:'card'});
     tnCard.appendChild(el('label',{class:'field-label',text:'Tournament leaderboard (live)'}));
     var tnList=el('div',{class:'scrolly'});
-    var top25=allScored.slice(0,25);
-    top25.forEach(function(x,pos){
-      var isDrafted=draftedNormSet[x.key];
-      var row=el('div',{class:'tourney-lb-row'+(isDrafted?' drafted-row':'')});
+    allScored.slice(0,25).forEach(function(x,pos){
+      var ownerName=draftedOwnerMap[x.key]||null;
+      var row=el('div',{class:'tourney-lb-row'+(ownerName?' drafted-row':'')});
       row.appendChild(el('span',{class:'tpos',text:(pos+1)+''}));
       var nameCell=el('span',{class:'tname'});
       nameCell.appendChild(document.createTextNode(liveDisplayNames[x.key]||x.key));
-      if(isDrafted) nameCell.appendChild(el('span',{class:'drafted-badge',text:'drafted'}));
+      if(ownerName) nameCell.appendChild(el('span',{class:'drafted-badge',text:ownerName}));
       row.appendChild(nameCell);
       row.appendChild(el('span',{class:'tscore',text:(x.score>0?'+':'')+x.score}));
       tnList.appendChild(row);
     });
     tnCard.appendChild(tnList);
     app.appendChild(tnCard);
+  }
+
+  // ── Pool standings ──
+  var results=teamResults();
+  results.sort(function(a,b){
+    if(a.total===null&&b.total===null) return 0;
+    if(a.total===null) return 1;
+    if(b.total===null) return -1;
+    return a.total-b.total;
+  });
+
+  app.appendChild(el('label',{class:'field-label',text:'Pool standings (lowest top-'+state.topScores+' total wins)',style:'display:block;margin:14px 2px 8px'}));
+  results.forEach(function(r,i){
+    var isLeading=i===0&&r.total!==null;
+    var card=el('div',{class:'lb-card'+(isLeading?' first':'')});
+    var head=el('div',{class:'lb-head'});
+    head.appendChild(el('span',{class:'lb-rank',text:(i+1)+'. '+r.player}));
+    var totalText=r.total===null?(r.scoredCount>0?'< '+state.topScores+' active':'—'):((r.total>0?'+':'')+r.total+(r.scoredCount>=state.topScores?'':' *'));
+    head.appendChild(el('span',{class:'lb-total',text:totalText}));
+    card.appendChild(head);
+    if(!r.hasEnough){
+      card.appendChild(el('p',{class:'small-muted',style:'margin:4px 0 0',text:'Needs '+(state.topScores-r.activeCount)+' more active golfer(s) to count.'}));
+    }
+    r.top5.forEach(function(x){
+      var row=el('div',{class:'lb-roster-row counts'});
+      row.appendChild(el('span',{text:x.golfer}));
+      row.appendChild(el('span',{class:'gscore',text:(x.score>0?'+':'')+x.score}));
+      card.appendChild(row);
+    });
+    r.rest.forEach(function(x){
+      var row=el('div',{class:'lb-roster-row'});
+      var nameEl=x.cut?el('span',{class:'cut-name',text:x.golfer}):el('span',{text:x.golfer});
+      row.appendChild(nameEl);
+      row.appendChild(el('span',{class:x.cut?'cut-x':'gscore',text:x.cut?'\u2717':(x.score===undefined?'\u2014':((x.score>0?'+':'')+x.score))}));
+      card.appendChild(row);
+    });
+    app.appendChild(card);
+  });
+
+  // ── All drafted golfers by score, with cut toggle ──
+  var sortedDrafted=drafted.map(function(g){ return {golfer:g,score:isCut(g)?undefined:scoreFor(g),cut:isCut(g)}; })
+    .sort(function(a,b){
+      if(a.cut&&!b.cut) return 1;
+      if(!a.cut&&b.cut) return -1;
+      if(a.score===undefined&&b.score===undefined) return 0;
+      if(a.score===undefined) return 1;
+      if(b.score===undefined) return -1;
+      return a.score-b.score;
+    });
+  var manCard=el('div',{class:'card'});
+  manCard.appendChild(el('label',{class:'field-label',text:'All drafted golfers — tap CUT to mark/unmark'}));
+  var mlist=el('div',{class:'scrolly'});
+  sortedDrafted.forEach(function(x){
+    var owner=ownerOf(x.golfer);
+    var row=el('div',{class:'gscore-row'});
+    var nameWrap=el('span',{style:'flex:1;display:flex;align-items:center;gap:4px;flex-wrap:wrap'});
+    nameWrap.appendChild(el('span',{class:x.cut?'cut-name':'',text:x.golfer}));
+    var ownerSpan=el('span',{style:'font-size:11px;color:var(--ink-soft);'});
+    ownerSpan.textContent='('+owner+')';
+    nameWrap.appendChild(ownerSpan);
+    row.appendChild(nameWrap);
+    // Cut toggle button
+    var cutBtn=el('button',{type:'button',class:'cut-toggle-btn'+(x.cut?' is-cut':''),text:x.cut?'UNCUT':'CUT'});
+    cutBtn.addEventListener('click',function(){ toggleCut(x.golfer); });
+    row.appendChild(cutBtn);
+    // Score or X
+    row.appendChild(el('span',{class:x.cut?'cut-x':'sc',text:x.cut?'\u2717':(x.score===undefined?'\u2014':((x.score>0?'+':'')+x.score))}));
+    mlist.appendChild(row);
+  });
+  manCard.appendChild(mlist);
+  app.appendChild(manCard);
+}
+
+function renderMoney(app){
+  var totalPot=(state.wagerWinner+state.wagerScore)*state.numPlayers;
+  var winnerPot=state.wagerWinner*state.numPlayers;
+  var scorePot=state.wagerScore*state.numPlayers;
+
+  // Who has the current tournament leader (non-cut)?
+  var allScored=Object.keys(liveScores).map(function(k){ return {key:k,score:liveScores[k]}; }).sort(function(a,b){ return a.score-b.score; });
+  var tournamentLeaderKey=allScored.length?allScored[0].key:null;
+  var winnerOwners=tournamentLeaderKey ? state.players.filter(function(p){
+    return state.picks.some(function(pk){ return pk.player===p&&normName(pk.golfer)===tournamentLeaderKey&&!isCut(pk.golfer); });
+  }) : [];
+
+  // Who has the current lowest team score?
+  var results=teamResults().filter(function(r){ return r.total!==null; });
+  results.sort(function(a,b){ return a.total-b.total; });
+  var scoreLeaders=[];
+  if(results.length){
+    var best=results[0].total;
+    scoreLeaders=results.filter(function(r){ return r.total===best; }).map(function(r){ return r.player; });
+  }
+
+  // Build per-player money summary
+  var summary=state.players.map(function(p){
+    var paid=state.wagerWinner+state.wagerScore;
+    // Winner pot share
+    var winnerShare=0;
+    if(winnerOwners.length&&winnerOwners.indexOf(p)>-1) winnerShare=winnerPot/winnerOwners.length;
+    // Score pot share
+    var scoreShare=0;
+    if(scoreLeaders.length&&scoreLeaders.indexOf(p)>-1) scoreShare=scorePot/scoreLeaders.length;
+    var net=(winnerShare+scoreShare)-paid;
+    return {player:p,paid:paid,winnerShare:winnerShare,scoreShare:scoreShare,net:net};
+  });
+
+  // Summary header
+  var hcard=el('div',{class:'money-card'});
+  hcard.appendChild(el('label',{class:'money-pot-label',text:'Total pots'}));
+  var potRow1=el('div',{class:'money-row'});
+  potRow1.appendChild(el('span',{text:'Tournament winner pot'}));
+  potRow1.appendChild(el('span',{class:'money-amount neutral',text:'$'+winnerPot}));
+  hcard.appendChild(potRow1);
+  var potRow2=el('div',{class:'money-row'});
+  potRow2.appendChild(el('span',{text:'Lowest team score pot'}));
+  potRow2.appendChild(el('span',{class:'money-amount neutral',text:'$'+scorePot}));
+  hcard.appendChild(potRow2);
+  var potRow3=el('div',{class:'money-row'});
+  potRow3.appendChild(el('span',{style:'font-weight:600',text:'Total pool'}));
+  potRow3.appendChild(el('span',{class:'money-amount neutral',style:'font-weight:600',text:'$'+totalPot}));
+  hcard.appendChild(potRow3);
+  app.appendChild(hcard);
+
+  // Current leader status
+  var statusCard=el('div',{class:'money-card'});
+  statusCard.appendChild(el('label',{class:'money-pot-label',text:'Current leaders'}));
+  var wr1=el('div',{class:'money-row'});
+  wr1.appendChild(el('span',{text:'Tournament leader owned by'}));
+  wr1.appendChild(el('span',{text:winnerOwners.length?winnerOwners.join(' & '):'No one drafted',style:'font-size:13px;color:var(--ink-soft)'}));
+  statusCard.appendChild(wr1);
+  var wr2=el('div',{class:'money-row'});
+  wr2.appendChild(el('span',{text:'Lowest team score'}));
+  wr2.appendChild(el('span',{text:scoreLeaders.length?scoreLeaders.join(' & '):'No scores yet',style:'font-size:13px;color:var(--ink-soft)'}));
+  statusCard.appendChild(wr2);
+  app.appendChild(statusCard);
+
+  // Per player breakdown
+  app.appendChild(el('label',{class:'field-label',text:'Current money position (if tournament ended now)',style:'display:block;margin:14px 2px 8px'}));
+  summary.sort(function(a,b){ return b.net-a.net; });
+  summary.forEach(function(s){
+    var card=el('div',{class:'money-card'});
+    var head=el('div',{class:'money-row',style:'border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:4px'});
+    head.appendChild(el('span',{style:'font-family:\'Playfair Display\',serif;font-size:16px',text:s.player}));
+    var netCls=s.net>0?'positive':s.net<0?'negative':'neutral';
+    head.appendChild(el('span',{class:'money-amount '+netCls,text:(s.net>=0?'+':'')+'\$'+s.net.toFixed(0)}));
+    card.appendChild(head);
+    var r1=el('div',{class:'money-row',style:'font-size:13px'});
+    r1.appendChild(el('span',{text:'Amount wagered',style:'color:var(--ink-soft)'}));
+    r1.appendChild(el('span',{text:'-$'+s.paid,style:'color:var(--ink-soft)'}));
+    card.appendChild(r1);
+    if(s.winnerShare>0){
+      var r2=el('div',{class:'money-row',style:'font-size:13px'});
+      r2.appendChild(el('span',{text:'Tournament winner pot'+(winnerOwners.length>1?' (split)':''),style:'color:#1a5c2e'}));
+      r2.appendChild(el('span',{text:'+$'+s.winnerShare.toFixed(0),style:'color:#1a5c2e'}));
+      card.appendChild(r2);
+    }
+    if(s.scoreShare>0){
+      var r3=el('div',{class:'money-row',style:'font-size:13px'});
+      r3.appendChild(el('span',{text:'Low score pot'+(scoreLeaders.length>1?' (split)':''),style:'color:#1a5c2e'}));
+      r3.appendChild(el('span',{text:'+$'+s.scoreShare.toFixed(0),style:'color:#1a5c2e'}));
+      card.appendChild(r3);
+    }
+    app.appendChild(card);
+  });
+  if(!winnerOwners.length&&!scoreLeaders.length){
+    app.appendChild(el('p',{class:'small-muted',text:'Money positions will appear once live scores load and golfers are active.'}));
   }
 }
 
