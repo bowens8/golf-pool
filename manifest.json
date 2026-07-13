@@ -1,0 +1,27 @@
+{
+  "name": "The Pool",
+  "short_name": "The Pool",
+  "description": "PGA Tour fantasy snake draft pool",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#00592c",
+  "theme_color": "#00592c",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

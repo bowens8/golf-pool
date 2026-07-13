@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>The Pool</title>
+<!-- PWA / Add to Home Screen -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="The Pool">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#00592c">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=EB+Garamond:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+  :root{
+    --masters-green:#00592c;
+    --masters-green-dark:#003d1e;
+    --masters-gold:#c9a227;
+    --masters-gold-light:#e3c876;
+    --cream:#faf7ef;
+    --cream-2:#f1ecdd;
+    --ink:#1d2b1f;
+    --ink-soft:#4a5a4c;
+    --line:rgba(0,89,44,0.18);
+    --danger:#7a2222;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--cream);color:var(--ink);font-family:'EB Garamond',Georgia,serif;font-size:17px;line-height:1.5;min-height:100vh;padding-bottom:3rem;}
+  h1,h2,h3,.serif-head{font-family:'Playfair Display',Georgia,serif;font-weight:600;letter-spacing:0.01em;}
+  header.top{background:linear-gradient(180deg,var(--masters-green) 0%,var(--masters-green-dark) 100%);color:var(--cream);padding:1.4rem 1.2rem 1.6rem;text-align:center;border-bottom:4px solid var(--masters-gold);position:relative;}
+  header.top .eyebrow{font-family:'EB Garamond',serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 6px;}
+  header.top h1{margin:0;font-size:26px;color:#fff;}
+  header.top .sub{margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.75);}
+  .wrap{max-width:560px;margin:0 auto;padding:0 1rem;}
+  .card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1rem 1.1rem;margin-bottom:0.9rem;}
+  .card.tappable{cursor:pointer;transition:border-color 0.15s;}
+  .card.tappable:hover{border-color:var(--masters-gold);}
+  .leader-banner{background:var(--masters-green);color:#fff;border:1px solid var(--masters-gold);border-radius:6px;padding:0.9rem 1.1rem;margin:1rem 0;}
+  .leader-banner .eyebrow{font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 4px;}
+  .leader-banner .name{font-family:'Playfair Display',serif;font-size:20px;margin:0;}
+  .leader-banner .meta{font-size:13px;color:rgba(255,255,255,0.85);margin:4px 0 0;}
+  .leader-banner .owners{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;}
+  .leader-banner .owner-pill{background:rgba(255,255,255,0.14);border:1px solid var(--masters-gold);color:var(--masters-gold-light);font-size:12px;padding:3px 10px;border-radius:999px;}
+  nav.tabs{display:flex;gap:6px;margin:1rem 0;}
+  nav.tabs button{flex:1;font-family:'EB Garamond',serif;font-size:13px;padding:9px 2px;background:#fff;border:1px solid var(--line);border-radius:5px;color:var(--ink-soft);cursor:pointer;}
+  nav.tabs button.active{background:var(--masters-green);color:#fff;border-color:var(--masters-green-dark);font-weight:600;}
+  label.field-label{display:block;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:6px;}
+  input[type=text],input[type=number]{width:100%;font-family:'EB Garamond',serif;font-size:16px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:var(--cream);color:var(--ink);}
+  input:focus{outline:2px solid var(--masters-gold);outline-offset:0;}
+  button.btn{font-family:'EB Garamond',serif;font-size:15px;padding:9px 14px;border-radius:5px;border:1px solid var(--masters-green);background:#fff;color:var(--masters-green);cursor:pointer;}
+  button.btn:active{transform:scale(0.98);}
+  button.btn.primary{background:var(--masters-green);color:#fff;}
+  button.btn.gold{background:var(--masters-gold);border-color:var(--masters-gold);color:var(--masters-green-dark);font-weight:600;}
+  button.btn.danger{border-color:var(--danger);color:var(--danger);}
+  button.btn.full{width:100%;}
+  .row-flex{display:flex;gap:8px;align-items:center;}
+  .list-row{display:flex;align-items:center;justify-content:space-between;padding:7px 2px;border-bottom:1px solid var(--line);font-size:15px;}
+  .list-row:last-child{border-bottom:none;}
+  .x-btn{background:none;border:none;color:var(--ink-soft);font-size:15px;cursor:pointer;padding:2px 6px;}
+  .pick-card{background:var(--cream-2);border:1px solid var(--masters-gold);border-radius:6px;padding:0.9rem 1rem;margin-bottom:0.8rem;}
+  .pick-card .eyebrow{font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 4px;}
+  .pick-card .onclock{font-family:'Playfair Display',serif;font-size:19px;margin:0;color:var(--masters-green-dark);}
+  .golfer-btn{display:block;width:100%;text-align:left;padding:8px 10px;margin-bottom:5px;border:1px solid var(--line);border-radius:5px;background:#fff;font-family:'EB Garamond',serif;font-size:15px;cursor:pointer;}
+  .golfer-btn:active{background:var(--cream-2);}
+  .roster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+  .roster-card{background:var(--cream-2);border-radius:5px;padding:8px 10px;}
+  .roster-card .pname{font-family:'Playfair Display',serif;font-size:13px;margin:0 0 4px;color:var(--masters-green-dark);}
+  .roster-card .gname{font-size:12.5px;color:var(--ink-soft);margin:0;}
+  .lb-card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:0.85rem 1rem;margin-bottom:0.7rem;}
+  .lb-card.first{border:2px solid var(--masters-gold);background:linear-gradient(180deg,#fffdf6,#fff);}
+  .lb-head{display:flex;justify-content:space-between;align-items:baseline;}
+  .lb-rank{font-family:'Playfair Display',serif;font-size:16px;color:var(--masters-green-dark);}
+  .lb-total{font-family:'Playfair Display',serif;font-size:19px;font-weight:600;color:var(--ink);}
+  .lb-roster-row{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;padding:2px 0;color:var(--ink-soft);}
+  .lb-roster-row.counts{color:var(--ink);font-weight:600;}
+  .lb-roster-row .gscore{font-family:'Playfair Display',serif;font-size:13px;white-space:nowrap;}
+  .lb-roster-detail{font-size:11px;color:var(--ink-soft);padding:0 0 3px;opacity:0.85;}
+  .tourney-lb-row{display:flex;align-items:baseline;justify-content:space-between;padding:5px 2px;border-bottom:1px solid var(--line);font-size:14px;}
+  .tourney-lb-row:last-child{border-bottom:none;}
+  .tourney-lb-row .tpos{color:var(--ink-soft);font-size:12px;min-width:28px;}
+  .tourney-lb-row .tname{flex:1;padding:0 6px;}
+  .tourney-lb-row .tname-sub{font-size:10.5px;color:var(--ink-soft);display:block;}
+  .tourney-lb-row .tscore{font-family:'Playfair Display',serif;font-weight:600;min-width:36px;text-align:right;font-size:13px;}
+  .tourney-lb-row .ttoday{font-size:11px;color:var(--ink-soft);min-width:40px;text-align:right;}
+  .tourney-lb-row.drafted-row{background:rgba(0,89,44,0.06);}
+  .drafted-badge{font-size:10px;background:var(--masters-green);color:#fff;border-radius:3px;padding:1px 5px;margin-left:4px;vertical-align:middle;}
+  .cut-x{color:#b0413e;font-size:15px;font-weight:700;min-width:36px;text-align:right;}
+  .cut-name{text-decoration:line-through;color:#b0413e;opacity:0.7;}
+  .cut-toggle-btn{font-size:10px;padding:2px 7px;border-radius:3px;border:1px solid var(--line);background:#fff;color:var(--ink-soft);cursor:pointer;margin-left:6px;flex-shrink:0;}
+  .cut-toggle-btn.is-cut{border-color:#b0413e;color:#b0413e;background:#fff5f5;}
+  .money-card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1rem 1.1rem;margin-bottom:0.9rem;}
+  .money-row{display:flex;align-items:center;justify-content:space-between;padding:8px 2px;border-bottom:1px solid var(--line);font-size:15px;}
+  .money-row:last-child{border-bottom:none;}
+  .money-amount{font-family:'Playfair Display',serif;font-size:17px;font-weight:600;}
+  .money-amount.positive{color:#1a5c2e;}
+  .money-amount.negative{color:#b0413e;}
+  .money-amount.neutral{color:var(--ink-soft);}
+  .money-pot-label{font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 10px;display:block;}
+  .money-split-note{font-size:12px;color:var(--ink-soft);margin-top:4px;}
+  .commish-btn{font-family:'EB Garamond',serif;font-size:11px;letter-spacing:0.06em;padding:4px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.4);background:rgba(255,255,255,0.12);color:#fff;cursor:pointer;}
+  .commish-btn.active{background:var(--masters-gold);border-color:var(--masters-gold);color:var(--masters-green-dark);font-weight:600;}
+  .small-muted{font-size:12.5px;color:var(--ink-soft);}
+  .gscore-row{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:7px 2px;font-size:14.5px;}
+  .gscore-row .sc{font-family:'Playfair Display',serif;font-weight:600;min-width:42px;text-align:right;padding-top:1px;}
+  .gscore-detail{font-size:11px;color:var(--ink-soft);margin-top:2px;}
+  .live-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--masters-green);text-transform:uppercase;letter-spacing:0.08em;}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--masters-green);animation:pulse 1.6s infinite;}
+  @keyframes pulse{0%{opacity:1;}50%{opacity:0.25;}100%{opacity:1;}}
+  .footer-note{text-align:center;font-size:11.5px;color:var(--ink-soft);margin-top:1.4rem;}
+  .scrolly{max-height:300px;overflow-y:auto;}
+  .config-banner{background:#fff3e0;border:1px solid #c98a1a;color:#5c3d0a;border-radius:6px;padding:0.9rem 1rem;font-size:14px;margin-bottom:1rem;}
+  .sync-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--ink-soft);margin-bottom:0.6rem;}
+  .sync-dot{width:7px;height:7px;border-radius:50%;background:#2e7d32;}
+  .sync-dot.off{background:#b0413e;}
+  .alt-card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:0.9rem 1rem;margin-bottom:0.9rem;}
+  .alt-row{padding:8px 2px;border-bottom:1px solid var(--line);}
+  .alt-row:last-child{border-bottom:none;}
+  .alt-row-head{display:flex;justify-content:space-between;align-items:baseline;font-size:14.5px;}
+  .alt-row-head .apname{font-family:'Playfair Display',serif;font-size:14.5px;color:var(--masters-green-dark);}
+  .alt-status{font-size:11px;letter-spacing:0.05em;text-transform:uppercase;padding:2px 8px;border-radius:999px;}
+  .alt-status.inactive{background:var(--cream-2);color:var(--ink-soft);}
+  .alt-status.active{background:var(--masters-gold);color:var(--masters-green-dark);font-weight:600;}
+  .pool-select-card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1rem 1.1rem;margin-bottom:0.8rem;cursor:pointer;transition:border-color 0.15s,box-shadow 0.15s;}
+  .pool-select-card:hover{border-color:var(--masters-gold);box-shadow:0 2px 8px rgba(0,89,44,0.1);}
+  .pool-select-name{font-family:'Playfair Display',serif;font-size:18px;color:var(--masters-green-dark);margin:0 0 2px;}
+  .pool-select-meta{font-size:13px;color:var(--ink-soft);}
+</style>
+</head>
+<body>
+<header class="top">
+  <div id="back-bar" style="position:absolute;top:12px;left:12px;"></div>
+  <p class="eyebrow" id="header-eyebrow">A tradition unlike any other</p>
+  <h1>The Pool</h1>
+  <p class="sub" id="header-sub">PGA Tour fantasy snake draft</p>
+  <div id="commish-bar" style="position:absolute;top:12px;right:12px;"></div>
+</header>
+<div class="wrap">
+  <div id="app"></div>
+  <p class="footer-note">Scores pulled from ESPN's public PGA leaderboard. Not affiliated with the PGA Tour, Augusta National, or ESPN.</p>
+</div>
+<script>
+(function(){
+var STORAGE_KEY='masters_pool_v2';
+var MAX_GOLFERS=175;
+var ESPN_URL='https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard';
+var REFRESH_MS=60000;
+var FIREBASE_CONFIG={
+  apiKey:"AIzaSyA7GRfQx1cGixQat1jwPRHN7_7RYteg5kY",
+  authDomain:"golf-pool-84d97.firebaseapp.com",
+  databaseURL:"https://golf-pool-84d97-default-rtdb.firebaseio.com",
+  projectId:"golf-pool-84d97"
+};
+var COMMISSIONER_PASSWORD='buns';
+var isCommissioner=false;
+var firebaseReady=FIREBASE_CONFIG.apiKey&&FIREBASE_CONFIG.apiKey.indexOf('YOUR_')!==0;
+var db=null;
+var dbRef=null;
+var syncConnected=false;
+var suppressNextWrite=false;
+
+// Multi-pool
+var currentPoolId=null;
+var poolsMeta={};
+var poolsMetaConnected=false;
+
+var state=null;
+var liveScores={};
+var liveDisplayNames={};
+var liveDetails={};
+var liveTournamentName='';
+var liveStatus='';
+var liveError=null;
+
+function defaultState(){
+  return{players:[],golfers:[],picks:[],cuts:{},alts:{},altActive:{},altReplacing:{},locked:false,wagerWinner:25,wagerScore:25,numPlayers:4,rosterSize:10,topScores:5,view:'setup'};
+}
+function normalizeState(s){
+  if(!s) s={};
+  if(!Array.isArray(s.players)) s.players=[];
+  if(!Array.isArray(s.golfers)) s.golfers=[];
+  if(!Array.isArray(s.picks)) s.picks=[];
+  if(!s.cuts||typeof s.cuts!=='object'||Array.isArray(s.cuts)) s.cuts={};
+  if(!s.alts||typeof s.alts!=='object'||Array.isArray(s.alts)) s.alts={};
+  if(!s.altActive||typeof s.altActive!=='object'||Array.isArray(s.altActive)) s.altActive={};
+  if(!s.altReplacing||typeof s.altReplacing!=='object'||Array.isArray(s.altReplacing)) s.altReplacing={};
+  if(typeof s.locked!=='boolean') s.locked=false;
+  if(typeof s.wagerWinner!=='number') s.wagerWinner=25;
+  if(typeof s.wagerScore!=='number') s.wagerScore=25;
+  if(typeof s.numPlayers!=='number'||s.numPlayers<2) s.numPlayers=4;
+  if(typeof s.rosterSize!=='number'||s.rosterSize<1) s.rosterSize=10;
+  if(typeof s.topScores!=='number'||s.topScores<1) s.topScores=5;
+  if(!s.view) s.view='setup';
+  return s;
+}
+
+function loadLocalState(poolId){
+  try{
+    var raw=localStorage.getItem(STORAGE_KEY+'_'+poolId);
+    if(raw) return normalizeState(JSON.parse(raw));
+  }catch(e){}
+  return defaultState();
+}
+function saveState(){
+  if(!state||!currentPoolId) return;
+  try{localStorage.setItem(STORAGE_KEY+'_'+currentPoolId,JSON.stringify(state));}catch(e){}
+  if(firebaseReady&&dbRef){suppressNextWrite=true;dbRef.set(state);}
+  if(db&&currentPoolId){
+    db.ref('poolsMeta/'+currentPoolId+'/playerCount').set(state.players.length).catch(function(){});
+  }
+}
+
+function initFirebase(){
+  if(!firebaseReady) return;
+  try{
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db=firebase.database();
+    db.ref('poolsMeta').on('value',function(snap){
+      poolsMetaConnected=true;
+      syncConnected=true;
+      poolsMeta=snap.val()||{};
+      if(currentPoolId===null) render();
+    },function(){
+      syncConnected=false;
+      render();
+    });
+  }catch(e){firebaseReady=false;}
+}
+
+function enterPool(poolId){
+  if(dbRef){dbRef.off();dbRef=null;}
+  currentPoolId=poolId;
+  state=loadLocalState(poolId);
+  if(db){
+    dbRef=db.ref('pools/'+poolId);
+    dbRef.on('value',function(snap){
+      var remote=snap.val();
+      if(suppressNextWrite){suppressNextWrite=false;return;}
+      if(remote){
+        state=normalizeState(remote);
+        try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
+      }else{
+        dbRef.set(state);
+      }
+      render();
+    },function(){render();});
+  }
+  render();
+  fetchLiveScores();
+}
+
+function leavePool(){
+  if(dbRef){dbRef.off();dbRef=null;}
+  currentPoolId=null;
+  state=null;
+  render();
+}
+
+function normName(n){return(n||'').toLowerCase().replace(/[.\-']/g,'').replace(/\s+/g,' ').trim();}
+
+function el(tag,attrs,children){
+  var e=document.createElement(tag);
+  attrs=attrs||{};
+  for(var k in attrs){
+    if(k==='text') e.textContent=attrs[k];
+    else if(k==='html') e.innerHTML=attrs[k];
+    else e.setAttribute(k,attrs[k]);
+  }
+  (children||[]).forEach(function(c){if(c) e.appendChild(c);});
+  return e;
+}
+function btn(label,onClick,cls){
+  var b=el('button',{type:'button',class:'btn '+(cls||'')});
+  b.textContent=label;
+  b.addEventListener('click',onClick);
+  return b;
+}
+
+function snakeOrder(numPlayers,rounds){
+  var order=[];
+  for(var r=0;r<rounds;r++){
+    var seq=[];
+    for(var i=0;i<numPlayers;i++) seq.push(i);
+    if(r%2===1) seq.reverse();
+    order=order.concat(seq);
+  }
+  return order;
+}
+
+function draftedNames(){return state.picks.map(function(p){return p.golfer;});}
+
+function formatScore(num){
+  if(num===undefined||num===null) return '\u2014';
+  if(num===0) return 'E';
+  return(num>0?'+':'')+num;
+}
+
+function golferDetailStr(normKey){
+  var d=liveDetails[normKey];
+  if(!d) return '';
+  var parts=[];
+  if(d.todayRaw&&d.todayRaw!=='0'&&d.todayRaw!=='') parts.push('Today: '+d.todayRaw);
+  if(d.statusDetail) parts.push(d.statusDetail);
+  return parts.join(' \u00b7 ');
+}
+
+function renderCommishBar(){
+  var bar=document.getElementById('commish-bar');
+  if(!bar) return;
+  bar.innerHTML='';
+  if(isCommissioner){
+    var b=el('button',{type:'button',class:'commish-btn active',text:'\uD83D\uDD12 Commish'});
+    b.addEventListener('click',function(){if(confirm('Log out of commissioner mode?')){isCommissioner=false;render();}});
+    bar.appendChild(b);
+  }else{
+    var b2=el('button',{type:'button',class:'commish-btn',text:'Commish login'});
+    b2.addEventListener('click',function(){
+      var pw=prompt('Commissioner password:');
+      if(pw===COMMISSIONER_PASSWORD){isCommissioner=true;render();alert('Welcome, Commissioner.');}
+      else if(pw!==null){alert('Wrong password.');}
+    });
+    bar.appendChild(b2);
+  }
+}
+
+function renderBackBar(){
+  var bar=document.getElementById('back-bar');
+  if(!bar) return;
+  bar.innerHTML='';
+  if(currentPoolId!==null){
+    var b=el('button',{type:'button',class:'commish-btn',text:'\u2039 Pools'});
+    b.addEventListener('click',leavePool);
+    bar.appendChild(b);
+  }
+}
+
+function updateHeader(){
+  var ey=document.getElementById('header-eyebrow');
+  var sb=document.getElementById('header-sub');
+  if(!ey||!sb) return;
+  if(currentPoolId&&poolsMeta[currentPoolId]){
+    ey.textContent=poolsMeta[currentPoolId].name||'The Pool';
+    sb.textContent='PGA Tour fantasy pool';
+  }else{
+    ey.textContent='A tradition unlike any other';
+    sb.textContent='PGA Tour fantasy snake draft';
+  }
+}
+
+function render(){
+  var app=document.getElementById('app');
+  app.innerHTML='';
+  renderCommishBar();
+  renderBackBar();
+  updateHeader();
+  if(currentPoolId===null){
+    renderPoolSelect(app);
+    return;
+  }
+  if(!firebaseReady){
+    var warn=el('div',{class:'config-banner'});
+    warn.innerHTML='Live sync isn\u2019t configured \u2014 this device is saving locally only.';
+    app.appendChild(warn);
+  }else{
+    var tag=el('div',{class:'sync-tag'});
+    tag.appendChild(el('span',{class:'sync-dot'+(syncConnected?'':' off')}));
+    tag.appendChild(document.createTextNode(syncConnected?' Synced live':' Connecting\u2026'));
+    app.appendChild(tag);
+  }
+  renderTabs(app);
+  if(state.view==='setup') renderSetup(app);
+  else if(state.view==='draft') renderDraft(app);
+  else if(state.view==='money') renderMoney(app);
+  else renderLeaderboard(app);
+}
+
+function renderPoolSelect(app){
+  var h=el('div',{style:'margin:1.2rem 0 1rem'});
+  h.appendChild(el('h2',{style:'font-family:\'Playfair Display\',serif;font-size:22px;margin:0 0 4px',text:'Select Your Pool'}));
+  app.appendChild(h);
+
+  if(!firebaseReady){
+    app.appendChild(el('p',{class:'small-muted',text:'Firebase not configured. Running in single-pool local mode.'}));
+    app.appendChild(btn('Enter pool',function(){enterPool('default-pool');},'primary full'));
+    return;
+  }
+
+  if(!poolsMetaConnected){
+    app.appendChild(el('p',{class:'small-muted',text:'Connecting to pools\u2026'}));
+    return;
+  }
+
+  var poolIds=Object.keys(poolsMeta);
+  if(!poolIds.length){
+    var msg=isCommissioner?'No pools yet. Create one below.':'No pools available yet. Ask your commissioner to set one up.';
+    app.appendChild(el('p',{class:'small-muted',text:msg}));
+  }else{
+    poolIds.sort(function(a,b){return(poolsMeta[a].createdAt||0)-(poolsMeta[b].createdAt||0);});
+    poolIds.forEach(function(poolId){
+      var meta=poolsMeta[poolId]||{};
+      var card=el('div',{class:'pool-select-card'});
+      card.addEventListener('click',function(){enterPool(poolId);});
+      card.appendChild(el('p',{class:'pool-select-name',text:meta.name||poolId}));
+      var pc=typeof meta.playerCount==='number'?meta.playerCount:0;
+      card.appendChild(el('p',{class:'pool-select-meta',text:pc+' player'+(pc===1?'':'s')+' \u00b7 tap to enter'}));
+      if(isCommissioner){
+        var delBtn=btn('Delete pool',function(e){
+          e.stopPropagation();
+          if(confirm('Delete "'+( meta.name||poolId)+'"? All data will be permanently lost.')){
+            db.ref('poolsMeta/'+poolId).remove();
+            db.ref('pools/'+poolId).remove();
+          }
+        },'danger');
+        delBtn.style.cssText='font-size:12px;padding:4px 10px;margin-top:8px;';
+        card.appendChild(delBtn);
+      }
+      app.appendChild(card);
+    });
+  }
+
+  if(isCommissioner&&db){
+    var ccard=el('div',{class:'card'});
+    ccard.appendChild(el('label',{class:'field-label',text:'Create new pool'}));
+    var crow=el('div',{class:'row-flex'});
+    var cinput=el('input',{type:'text',placeholder:'Pool name, e.g. Masters 2026'});
+    var crebtn=btn('Create',function(){
+      var name=cinput.value.trim();
+      if(!name) return;
+      var poolId='pool_'+Date.now();
+      db.ref('poolsMeta/'+poolId).set({name:name,createdAt:Date.now(),playerCount:0}).then(function(){cinput.value='';});
+    },'primary');
+    crow.appendChild(cinput);crow.appendChild(crebtn);
+    ccard.appendChild(crow);
+    cinput.addEventListener('keydown',function(e){if(e.key==='Enter') crebtn.click();});
+    app.appendChild(ccard);
+  }
+}
+
+function renderTabs(app){
+  var nav=el('nav',{class:'tabs'});
+  [['setup','Setup'],['draft','Draft'],['leaderboard','Scores'],['money','Money']].forEach(function(t){
+    var b=btn(t[1],function(){state.view=t[0];saveState();render();});
+    if(state.view===t[0]) b.classList.add('active');
+    nav.appendChild(b);
+  });
+  app.appendChild(nav);
+}
+
+function renderSetup(app){
+  if(state.locked){
+    var lockBanner=el('div',{style:'background:var(--masters-green);color:#fff;border-radius:6px;padding:0.9rem 1rem;margin-bottom:0.8rem;text-align:center'});
+    lockBanner.appendChild(el('p',{style:'margin:0 0 4px;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--masters-gold-light)',text:'Tournament in progress'}));
+    lockBanner.appendChild(el('p',{style:'margin:0;font-family:\'Playfair Display\',serif;font-size:18px',text:'Teams are locked \uD83D\uDD12'}));
+    app.appendChild(lockBanner);
+    app.appendChild(el('p',{class:'small-muted',style:'margin:0 0 12px',text:'Head to Draft to view rosters or Scores to track the tournament.'}));
+    if(isCommissioner){
+      app.appendChild(btn('Unlock teams',function(){if(confirm('Unlock teams?')){state.locked=false;saveState();render();}},'full'));
+    }
+    return;
+  }
+
+  if(!isCommissioner){
+    app.appendChild(el('p',{class:'small-muted',style:'margin-bottom:10px',text:'Only the commissioner can edit settings. Head to the Draft tab when it\u2019s your turn to pick.'}));
+  }
+
+  var card=el('div',{class:'card'});
+  card.appendChild(el('label',{class:'field-label',text:'Players ('+state.players.length+'/'+state.numPlayers+')'}));
+  state.players.forEach(function(p,i){
+    var row=el('div',{class:'list-row'});
+    row.appendChild(el('span',{text:p}));
+    if(isCommissioner){
+      var x=el('button',{class:'x-btn',text:'remove'});
+      x.addEventListener('click',function(){state.players.splice(i,1);saveState();render();});
+      row.appendChild(x);
+    }
+    card.appendChild(row);
+  });
+  if(isCommissioner&&state.players.length<state.numPlayers){
+    var prow=el('div',{class:'row-flex',style:'margin-top:8px'});
+    var pinput=el('input',{type:'text',placeholder:'Player name'});
+    var paddbtn=btn('Add',function(){var v=pinput.value.trim();if(v){state.players.push(v);saveState();render();}});
+    prow.appendChild(pinput);prow.appendChild(paddbtn);
+    card.appendChild(prow);
+    pinput.addEventListener('keydown',function(e){if(e.key==='Enter') paddbtn.click();});
+  }
+  app.appendChild(card);
+
+  var gcard=el('div',{class:'card'});
+  gcard.appendChild(el('label',{class:'field-label',text:'Golfer pool ('+state.golfers.length+' / min '+(state.rosterSize*state.numPlayers)+', max '+MAX_GOLFERS+')'}));
+  if(isCommissioner){
+    var importRow=el('div',{class:'row-flex',style:'margin-bottom:10px'});
+    var importBtn=btn('Import this week\'s field from ESPN',function(){
+      importBtn.textContent='Importing\u2026';importBtn.disabled=true;
+      fetch(ESPN_URL).then(function(r){return r.json();}).then(function(data){
+        var ev=data.events&&data.events[0];
+        var comp=ev&&ev.competitions&&ev.competitions[0];
+        var competitors=comp&&comp.competitors||[];
+        if(!competitors.length){importStatus.textContent='No field found — try again closer to tournament start.';importStatus.style.color='var(--danger)';importBtn.textContent='Import this week\'s field from ESPN';importBtn.disabled=false;return;}
+        var added=0,skipped=0;
+        competitors.forEach(function(c){
+          var nm=c.athlete&&(c.athlete.displayName||c.athlete.fullName);
+          if(!nm) return;
+          nm=nm.trim();
+          if(state.golfers.indexOf(nm)===-1&&state.golfers.length<MAX_GOLFERS){state.golfers.push(nm);added++;}else skipped++;
+        });
+        saveState();
+        importStatus.textContent='Imported '+added+' golfer(s) from '+(ev.name||'ESPN')+(skipped?' ('+skipped+' skipped)':'')+'.';
+        importStatus.style.color='var(--masters-green)';
+        importBtn.textContent='Re-import / refresh field';importBtn.disabled=false;render();
+      }).catch(function(){importStatus.textContent='Could not reach ESPN. Check connection and try again.';importStatus.style.color='var(--danger)';importBtn.textContent='Import this week\'s field from ESPN';importBtn.disabled=false;});
+    },'primary');
+    importRow.appendChild(importBtn);
+    gcard.appendChild(importRow);
+    var importStatus=el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Pulls the current PGA Tour field from ESPN. Works best Tue\u2013Sun of tournament week.'});
+    gcard.appendChild(importStatus);
+  }
+  var glist=el('div',{class:'scrolly'});
+  state.golfers.forEach(function(g,i){
+    var row=el('div',{class:'list-row'});
+    row.appendChild(el('span',{text:g}));
+    if(isCommissioner){
+      var x=el('button',{class:'x-btn',text:'remove'});
+      x.addEventListener('click',function(){state.golfers.splice(i,1);saveState();render();});
+      row.appendChild(x);
+    }
+    glist.appendChild(row);
+  });
+  gcard.appendChild(glist);
+  if(isCommissioner){
+    if(state.golfers.length<MAX_GOLFERS){
+      var grow=el('div',{class:'row-flex',style:'margin-top:8px'});
+      var ginput=el('input',{type:'text',placeholder:'Add golfer manually'});
+      var gaddbtn=btn('Add',function(){var v=ginput.value.trim();if(v&&state.golfers.indexOf(v)===-1&&state.golfers.length<MAX_GOLFERS){state.golfers.push(v);saveState();ginput.value='';render();ginput.focus();}});
+      grow.appendChild(ginput);grow.appendChild(gaddbtn);
+      gcard.appendChild(grow);
+      ginput.addEventListener('keydown',function(e){if(e.key==='Enter') gaddbtn.click();});
+    }else{
+      gcard.appendChild(el('p',{class:'small-muted',text:'Pool is full at '+MAX_GOLFERS+' golfers.'}));
+    }
+    if(state.golfers.length>0){
+      var clearBtn=btn('Clear all golfers',function(){if(confirm('Remove all '+state.golfers.length+' golfers?')){state.golfers=[];saveState();render();}},'danger full');
+      clearBtn.style.marginTop='8px';
+      gcard.appendChild(clearBtn);
+    }
+  }
+  app.appendChild(gcard);
+
+  if(isCommissioner){
+    var scard=el('div',{class:'card'});
+    scard.appendChild(el('label',{class:'field-label',text:'Pool settings'}));
+    function settingRow(labelText,value,min,max,onChange){
+      var row=el('div',{class:'row-flex',style:'margin-bottom:10px'});
+      row.appendChild(el('span',{text:labelText,style:'flex:1;font-size:14px'}));
+      var wrap=el('div',{class:'row-flex',style:'gap:0'});
+      var dn=el('button',{type:'button',class:'btn',style:'padding:6px 12px;border-radius:5px 0 0 5px;border-right:none'});
+      dn.textContent='\u2212';
+      var display=el('span',{style:'min-width:36px;text-align:center;font-size:16px;font-family:\'Playfair Display\',serif;padding:0 4px;border:1px solid var(--line);border-left:none;border-right:none;display:flex;align-items:center;justify-content:center'});
+      display.textContent=value;
+      var up=el('button',{type:'button',class:'btn',style:'padding:6px 12px;border-radius:0 5px 5px 0;border-left:none'});
+      up.textContent='+';
+      dn.addEventListener('click',function(){onChange(Math.max(min,value-1));});
+      up.addEventListener('click',function(){onChange(Math.min(max,value+1));});
+      wrap.appendChild(dn);wrap.appendChild(display);wrap.appendChild(up);
+      row.appendChild(wrap);
+      return row;
+    }
+    scard.appendChild(settingRow('Players in pool',state.numPlayers,2,10,function(v){if(v<state.players.length){alert('Remove players first.');return;}state.numPlayers=v;saveState();render();}));
+    scard.appendChild(settingRow('Golfers per team',state.rosterSize,1,20,function(v){if(v<state.topScores) state.topScores=v;state.rosterSize=v;saveState();render();}));
+    scard.appendChild(settingRow('Top scores that count',state.topScores,1,state.rosterSize,function(v){state.topScores=v;saveState();render();}));
+    app.appendChild(scard);
+
+    var wcard=el('div',{class:'card'});
+    wcard.appendChild(el('label',{class:'field-label',text:'Wager amounts'}));
+    var wrow1=el('div',{class:'row-flex',style:'margin-bottom:10px'});
+    wrow1.appendChild(el('span',{text:'$ per player — tournament winner:',style:'flex:1;font-size:14px'}));
+    var wi1=el('input',{type:'number',min:'0',step:'1',style:'width:72px;text-align:right'});wi1.value=state.wagerWinner;
+    wi1.addEventListener('change',function(){var v=parseInt(this.value,10);if(!isNaN(v)&&v>=0){state.wagerWinner=v;saveState();}});
+    wrow1.appendChild(wi1);wcard.appendChild(wrow1);
+    var wrow2=el('div',{class:'row-flex'});
+    wrow2.appendChild(el('span',{text:'$ per player — lowest team score:',style:'flex:1;font-size:14px'}));
+    var wi2=el('input',{type:'number',min:'0',step:'1',style:'width:72px;text-align:right'});wi2.value=state.wagerScore;
+    wi2.addEventListener('change',function(){var v=parseInt(this.value,10);if(!isNaN(v)&&v>=0){state.wagerScore=v;saveState();}});
+    wrow2.appendChild(wi2);wcard.appendChild(wrow2);
+    var wtotal=state.wagerWinner+state.wagerScore;
+    wcard.appendChild(el('p',{class:'small-muted',style:'margin-top:8px',text:'Each player puts in $'+wtotal+' total. Winner pot: $'+(state.wagerWinner*state.numPlayers)+'. Score pot: $'+(state.wagerScore*state.numPlayers)+'.'}));
+    app.appendChild(wcard);
+  }else{
+    var roCard=el('div',{class:'card'});
+    roCard.appendChild(el('label',{class:'field-label',text:'Pool settings'}));
+    roCard.appendChild(el('p',{class:'small-muted',style:'margin:2px 0',text:state.numPlayers+' players \u00b7 '+state.rosterSize+' golfers per team \u00b7 top '+state.topScores+' scores count'}));
+    roCard.appendChild(el('p',{class:'small-muted',style:'margin:2px 0',text:'Wager: $'+state.wagerWinner+' winner / $'+state.wagerScore+' low score per player'}));
+    app.appendChild(roCard);
+  }
+
+  var canStart=state.players.length===state.numPlayers&&state.golfers.length>=state.rosterSize*state.numPlayers;
+  var draftDone=state.picks.length>=state.rosterSize*state.numPlayers&&Object.keys(state.alts).length>=state.numPlayers;
+  if(isCommissioner){
+    if(canStart&&state.picks.length===0){
+      app.appendChild(btn('Start snake draft',function(){state.view='draft';saveState();render();},'primary full'));
+    }else if(!canStart){
+      var need=Math.max(0,state.rosterSize*state.numPlayers-state.golfers.length);
+      var msg=state.players.length<state.numPlayers?('Add '+(state.numPlayers-state.players.length)+' more player(s).'):(need>0?('Add '+need+' more golfer(s) \u2014 need '+(state.rosterSize*state.numPlayers)+' total.'):'');
+      if(msg) app.appendChild(el('p',{class:'small-muted',text:msg}));
+    }
+    if(draftDone){
+      var lkBtn=btn('Lock teams \uD83D\uDD12 (tournament starting)',function(){if(confirm('Lock all teams? Do this Thursday morning.')){state.locked=true;saveState();render();}},'gold full');
+      lkBtn.style.marginTop='6px';app.appendChild(lkBtn);
+    }
+    if(state.picks.length>0){
+      var rstBtn=btn('Reset everything',function(){if(confirm('Clear all players, golfers, picks and alts?')){state=defaultState();saveState();render();}},'danger full');
+      rstBtn.style.marginTop='6px';app.appendChild(rstBtn);
+    }
+  }
+}
+
+function renderDraft(app){
+  if(state.players.length<state.numPlayers||state.golfers.length<state.rosterSize*state.numPlayers){
+    app.appendChild(el('p',{class:'small-muted',text:'Finish setup first.'}));return;
+  }
+  if(state.locked){
+    var lb=el('div',{style:'background:var(--masters-green);color:#fff;border-radius:6px;padding:0.8rem 1rem;margin-bottom:1rem;text-align:center'});
+    lb.appendChild(el('p',{style:'margin:0;font-family:\'Playfair Display\',serif;font-size:16px',text:'\uD83D\uDD12 Teams are locked \u2014 tournament is underway'}));
+    app.appendChild(lb);
+  }
+  var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
+  var mainDone=state.picks.length>=mainOrder.length;
+  var altsDone=Object.keys(state.alts).length>=state.numPlayers;
+  var altOrder=snakeOrder(state.numPlayers,state.rosterSize+1).slice(state.numPlayers*state.rosterSize);
+  var altsPickedSoFar=Object.keys(state.alts).length;
+  var allTaken=draftedNames().concat(Object.values(state.alts));
+
+  if(mainDone&&altsDone){
+    app.appendChild(el('p',{class:'serif-head',style:'font-size:18px;margin:0 0 12px',text:'Draft complete \u2714'}));
+  }else if(!mainDone&&!state.locked){
+    var idx=state.picks.length;
+    var onClockIdx=mainOrder[idx];
+    var round=Math.floor(idx/state.numPlayers)+1;
+    var pickInRound=(idx%state.numPlayers)+1;
+    var pc=el('div',{class:'pick-card'});
+    pc.appendChild(el('p',{class:'eyebrow',text:'Round '+round+' \u00b7 Pick '+pickInRound}));
+    pc.appendChild(el('p',{class:'onclock',text:state.players[onClockIdx]+' is on the clock'}));
+    app.appendChild(pc);
+    var available=state.golfers.filter(function(g){return allTaken.indexOf(g)===-1;});
+    var card=el('div',{class:'card'});
+    var search=el('input',{type:'text',placeholder:'Search golfer'});
+    card.appendChild(search);
+    var list=el('div',{class:'scrolly',style:'margin-top:8px'});
+    card.appendChild(list);app.appendChild(card);
+    function renderMainList(f){
+      list.innerHTML='';
+      available.filter(function(g){return g.toLowerCase().indexOf(f.toLowerCase())>-1;}).forEach(function(g){
+        var b=el('button',{type:'button',class:'golfer-btn',text:g});
+        b.addEventListener('click',function(){state.picks.push({player:state.players[onClockIdx],golfer:g});saveState();render();});
+        list.appendChild(b);
+      });
+    }
+    renderMainList('');
+    search.addEventListener('input',function(){renderMainList(search.value);});
+  }else if(mainDone&&!altsDone&&!state.locked){
+    var altIdx=altsPickedSoFar;
+    var altOnClockIdx=altOrder[altIdx];
+    var altPlayer=state.players[altOnClockIdx];
+    var pc2=el('div',{class:'pick-card'});
+    pc2.appendChild(el('p',{class:'eyebrow',text:'Alt round \u00b7 Pick '+(altIdx+1)}));
+    pc2.appendChild(el('p',{class:'onclock',text:altPlayer+' picks their alt'}));
+    pc2.appendChild(el('p',{style:'font-size:12px;color:var(--ink-soft);margin:4px 0 0',text:'Alt only counts if a golfer WDs before the tournament and the commissioner activates it.'}));
+    app.appendChild(pc2);
+    var available2=state.golfers.filter(function(g){return allTaken.indexOf(g)===-1;});
+    var card2=el('div',{class:'card'});
+    var search2=el('input',{type:'text',placeholder:'Search golfer'});
+    card2.appendChild(search2);
+    var list2=el('div',{class:'scrolly',style:'margin-top:8px'});
+    card2.appendChild(list2);app.appendChild(card2);
+    function renderAltList(f){
+      list2.innerHTML='';
+      available2.filter(function(g){return g.toLowerCase().indexOf(f.toLowerCase())>-1;}).forEach(function(g){
+        var b=el('button',{type:'button',class:'golfer-btn',text:g});
+        b.addEventListener('click',function(){state.alts[altPlayer]=g;saveState();render();});
+        list2.appendChild(b);
+      });
+    }
+    renderAltList('');
+    search2.addEventListener('input',function(){renderAltList(search2.value);});
+  }
+
+  app.appendChild(el('label',{class:'field-label',text:'Rosters so far',style:'display:block;margin:14px 2px 8px'}));
+  var grid=el('div',{class:'roster-grid'});
+  state.players.forEach(function(p){
+    var picksForP=state.picks.filter(function(pk){return pk.player===p;}).map(function(pk){return pk.golfer;});
+    var rc=el('div',{class:'roster-card'});
+    rc.appendChild(el('p',{class:'pname',text:p+' ('+picksForP.length+'/'+state.rosterSize+')'}));
+    picksForP.forEach(function(g){
+      var isWd=state.altActive[p]&&state.altReplacing[p]===g;
+      rc.appendChild(el('p',{class:'gname',style:isWd?'text-decoration:line-through;opacity:0.65':'',text:g+(isWd?' (WD)':'')}));
+    });
+    if(state.alts[p]){
+      rc.appendChild(el('p',{class:'gname',style:'color:var(--masters-gold);font-style:italic',text:'ALT: '+state.alts[p]+(state.altActive&&state.altActive[p]?' \u2605':'')}));
+    }
+    grid.appendChild(rc);
+  });
+  app.appendChild(grid);
+  if(!state.locked){
+    if(state.picks.length>0&&!mainDone){
+      app.appendChild(btn('Undo last pick',function(){state.picks.pop();saveState();render();},'full'));
+    }else if(mainDone&&!altsDone&&altsPickedSoFar>0){
+      app.appendChild(btn('Undo last alt pick',function(){var lp=altOrder[altsPickedSoFar-1];delete state.alts[state.players[lp]];saveState();render();},'full'));
+    }
+  }
+}
+
+function renderAltsCard(app){
+  var card=el('div',{class:'alt-card'});
+  card.appendChild(el('label',{class:'field-label',text:'Alternates \u2014 activate if a golfer withdraws before the tournament'}));
+  if(!isCommissioner){
+    card.appendChild(el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Only the commissioner can activate an alt.'}));
+  }
+  state.players.forEach(function(p){
+    if(!state.alts[p]) return;
+    var row=el('div',{class:'alt-row'});
+    var head=el('div',{class:'alt-row-head'});
+    head.appendChild(el('span',{class:'apname',text:p+': '+state.alts[p]}));
+    var active=!!state.altActive[p];
+    head.appendChild(el('span',{class:'alt-status '+(active?'active':'inactive'),text:active?'Active':'Not active'}));
+    row.appendChild(head);
+    if(active){
+      row.appendChild(el('p',{class:'small-muted',style:'margin:4px 0 0',text:'Replacing '+state.altReplacing[p]+' in scoring.'}));
+      if(isCommissioner){
+        var db2=btn('Deactivate alt',function(){delete state.altActive[p];delete state.altReplacing[p];saveState();render();},'');
+        db2.style.cssText='margin-top:6px;font-size:12px;padding:5px 10px;';
+        row.appendChild(db2);
+      }
+    }else if(isCommissioner){
+      var picksForP=state.picks.filter(function(pk){return pk.player===p;}).map(function(pk){return pk.golfer;});
+      var cw=el('div',{style:'margin-top:6px'});
+      cw.appendChild(el('p',{class:'small-muted',style:'margin:0 0 6px',text:'Which golfer is out? Tap to activate:'}));
+      picksForP.forEach(function(g){
+        var gb=el('button',{type:'button',class:'golfer-btn',style:'font-size:13px;padding:6px 9px',text:g});
+        gb.addEventListener('click',function(){
+          if(confirm('Activate alt for '+p+'? '+state.alts[p]+' will replace '+g+'.')){
+            state.altActive[p]=true;state.altReplacing[p]=g;saveState();render();
+          }
+        });
+        cw.appendChild(gb);
+      });
+      row.appendChild(cw);
+    }
+    card.appendChild(row);
+  });
+  app.appendChild(card);
+}
+
+function isCut(g){return!!(state.cuts&&state.cuts[normName(g)]);}
+function toggleCut(g){
+  if(!isCommissioner) return;
+  var key=normName(g);
+  if(!state.cuts) state.cuts={};
+  if(state.cuts[key]) delete state.cuts[key];else state.cuts[key]=true;
+  saveState();render();
+}
+function ownerOf(g){
+  var pk=state.picks.find(function(pk){return pk.golfer===g;});
+  return pk?pk.player:'';
+}
+function scoreFor(g){
+  if(isCut(g)) return undefined;
+  var key=normName(g);
+  if(liveScores.hasOwnProperty(key)) return liveScores[key];
+  return undefined;
+}
+
+function teamResults(){
+  return state.players.map(function(p){
+    var picksForP=state.picks.filter(function(pk){return pk.player===p;}).map(function(pk){return pk.golfer;});
+    var withdrawnGolfer=null,altInUse=null;
+    if(state.altActive[p]&&state.altReplacing[p]&&state.alts[p]){
+      withdrawnGolfer=state.altReplacing[p];altInUse=state.alts[p];
+      picksForP=picksForP.filter(function(g){return g!==withdrawnGolfer;});
+      picksForP.push(altInUse);
+    }
+    var active=picksForP.filter(function(g){return!isCut(g);});
+    var cut=picksForP.filter(function(g){return isCut(g);});
+    var scoredActive=active.map(function(g){return{golfer:g,score:scoreFor(g),cut:false,alt:g===altInUse};}).filter(function(x){return x.score!==undefined;}).sort(function(a,b){return a.score-b.score;});
+    var unscoredActive=active.filter(function(g){return scoreFor(g)===undefined;}).map(function(g){return{golfer:g,score:undefined,cut:false,alt:g===altInUse};});
+    var cutList=cut.map(function(g){return{golfer:g,score:undefined,cut:true,alt:false};});
+    var wdList=withdrawnGolfer?[{golfer:withdrawnGolfer,score:undefined,cut:false,wd:true}]:[];
+    var topN=scoredActive.slice(0,state.topScores);
+    var rest=scoredActive.slice(state.topScores).concat(unscoredActive).concat(cutList).concat(wdList);
+    var hasEnough=active.length>=state.topScores;
+    var total=hasEnough?topN.reduce(function(s,x){return s+x.score;},0):null;
+    return{player:p,top5:topN,rest:rest,total:total,hasEnough:hasEnough,scoredCount:scoredActive.length,activeCount:active.length};
+  });
+}
+
+function renderLeaderboard(app){
+  var drafted=draftedNames();
+  if(!drafted.length){app.appendChild(el('p',{class:'small-muted',text:'Draft golfers first.'}));return;}
+
+  var liveBar=el('div',{class:'row-flex',style:'margin-bottom:10px;justify-content:space-between'});
+  var ltag=el('span',{class:'live-tag'});
+  ltag.appendChild(el('span',{class:'live-dot'}));
+  var statusText=liveError?'Live scores unavailable':(liveTournamentName?(liveTournamentName+(liveStatus?' \u00b7 '+liveStatus:'')):'Loading live scores\u2026');
+  ltag.appendChild(document.createTextNode(' '+statusText));
+  liveBar.appendChild(ltag);
+  var refreshBtn=btn('Refresh',function(){fetchLiveScores(true);},'');
+  refreshBtn.style.cssText='font-size:12px;padding:5px 10px;';
+  liveBar.appendChild(refreshBtn);
+  app.appendChild(liveBar);
+
+  var draftedOwnerMap={};
+  drafted.forEach(function(g){draftedOwnerMap[normName(g)]=ownerOf(g);});
+  var allScored=Object.keys(liveScores).map(function(k){return{key:k,score:liveScores[k]};}).sort(function(a,b){return a.score-b.score;});
+
+  // Leader banner
+  var lowest=allScored[0]||null;
+  if(lowest){
+    var leaderName=liveDisplayNames[lowest.key]||lowest.key;
+    var owners=state.players.filter(function(p){return state.picks.some(function(pk){return pk.player===p&&normName(pk.golfer)===lowest.key&&!isCut(pk.golfer);});});
+    var banner=el('div',{class:'leader-banner'});
+    banner.appendChild(el('p',{class:'eyebrow',text:'Leading the tournament'}));
+    banner.appendChild(el('p',{class:'name',text:leaderName+' \u00b7 '+formatScore(lowest.score)}));
+    var ld=liveDetails[lowest.key];
+    if(ld&&ld.statusDetail) banner.appendChild(el('p',{class:'meta',text:ld.statusDetail}));
+    if(owners.length){
+      var ow=el('div',{class:'owners'});
+      owners.forEach(function(o){ow.appendChild(el('span',{class:'owner-pill',text:o+' has the leader'}));});
+      banner.appendChild(ow);
+    }else{banner.appendChild(el('p',{class:'meta',text:'Not on anyone\u2019s roster'}));}
+    app.appendChild(banner);
+  }
+
+  // Tournament leaderboard (top 25)
+  if(allScored.length>0){
+    var tnCard=el('div',{class:'card'});
+    tnCard.appendChild(el('label',{class:'field-label',text:'Tournament leaderboard (live)'}));
+    var tnList=el('div',{class:'scrolly'});
+    allScored.slice(0,25).forEach(function(x,pos){
+      var ownerName=draftedOwnerMap[x.key]||null;
+      var d=liveDetails[x.key]||{};
+      var row=el('div',{class:'tourney-lb-row'+(ownerName?' drafted-row':'')});
+      row.appendChild(el('span',{class:'tpos',text:(pos+1)+''}));
+      var nameCell=el('span',{class:'tname'});
+      nameCell.appendChild(document.createTextNode(liveDisplayNames[x.key]||x.key));
+      if(ownerName) nameCell.appendChild(el('span',{class:'drafted-badge',text:ownerName}));
+      if(d.statusDetail) nameCell.appendChild(el('span',{class:'tname-sub',text:d.statusDetail}));
+      row.appendChild(nameCell);
+      var scoreCol=el('div',{style:'text-align:right;min-width:64px'});
+      scoreCol.appendChild(el('div',{class:'tscore',text:formatScore(x.score)}));
+      if(d.todayRaw&&d.todayRaw!=='') scoreCol.appendChild(el('div',{class:'ttoday',text:'Rd: '+d.todayRaw}));
+      row.appendChild(scoreCol);
+      tnList.appendChild(row);
+    });
+    tnCard.appendChild(tnList);
+    app.appendChild(tnCard);
+  }
+
+  // Pool standings
+  var results=teamResults();
+  results.sort(function(a,b){
+    if(a.total===null&&b.total===null) return 0;
+    if(a.total===null) return 1;if(b.total===null) return -1;
+    return a.total-b.total;
+  });
+  app.appendChild(el('label',{class:'field-label',text:'Pool standings (lowest top-'+state.topScores+' total wins)',style:'display:block;margin:14px 2px 8px'}));
+  results.forEach(function(r,i){
+    var card=el('div',{class:'lb-card'+(i===0&&r.total!==null?' first':'')});
+    var head=el('div',{class:'lb-head'});
+    head.appendChild(el('span',{class:'lb-rank',text:(i+1)+'. '+r.player}));
+    var tt=r.total===null?(r.scoredCount>0?'< '+state.topScores+' active':'\u2014'):formatScore(r.total)+(r.scoredCount>=state.topScores?'':' *');
+    head.appendChild(el('span',{class:'lb-total',text:tt}));
+    card.appendChild(head);
+    if(!r.hasEnough) card.appendChild(el('p',{class:'small-muted',style:'margin:4px 0 0',text:'Needs '+(state.topScores-r.activeCount)+' more active golfer(s).'}));
+    r.top5.forEach(function(x){
+      var row=el('div',{class:'lb-roster-row counts'});
+      var nameStr=x.golfer+(x.alt?' (ALT)':'');
+      row.appendChild(el('span',{text:nameStr}));
+      row.appendChild(el('span',{class:'gscore',text:formatScore(x.score)}));
+      card.appendChild(row);
+      var dk=normName(x.golfer);
+      var ds=golferDetailStr(dk);
+      if(ds) card.appendChild(el('div',{class:'lb-roster-detail',text:ds}));
+    });
+    r.rest.forEach(function(x){
+      var row=el('div',{class:'lb-roster-row'});
+      var nameEl=(x.cut||x.wd)?el('span',{class:'cut-name',text:x.golfer+(x.alt?' (ALT)':'')}):el('span',{text:x.golfer+(x.alt?' (ALT)':'')});
+      row.appendChild(nameEl);
+      var st=x.wd?'WD':x.cut?'\u2717':(x.score===undefined?'\u2014':formatScore(x.score));
+      row.appendChild(el('span',{class:(x.cut||x.wd)?'cut-x':'gscore',text:st}));
+      card.appendChild(row);
+      if(!x.cut&&!x.wd){
+        var dk2=normName(x.golfer);var ds2=golferDetailStr(dk2);
+        if(ds2) card.appendChild(el('div',{class:'lb-roster-detail',text:ds2}));
+      }
+    });
+    app.appendChild(card);
+  });
+
+  // All drafted golfers by score
+  var sortedDrafted=drafted.map(function(g){return{golfer:g,score:isCut(g)?undefined:scoreFor(g),cut:isCut(g)};})
+    .sort(function(a,b){
+      if(a.cut&&!b.cut) return 1;if(!a.cut&&b.cut) return -1;
+      if(a.score===undefined&&b.score===undefined) return 0;
+      if(a.score===undefined) return 1;if(b.score===undefined) return -1;
+      return a.score-b.score;
+    });
+  var manCard=el('div',{class:'card'});
+  manCard.appendChild(el('label',{class:'field-label',text:isCommissioner?'All drafted golfers \u2014 tap CUT to mark/unmark':'All drafted golfers (by score)'}));
+  var mlist=el('div',{class:'scrolly'});
+  sortedDrafted.forEach(function(x){
+    var owner=ownerOf(x.golfer);
+    var nk=normName(x.golfer);
+    var d=liveDetails[nk]||{};
+    var row=el('div',{class:'gscore-row',style:'align-items:flex-start'});
+    var left=el('div',{style:'flex:1;min-width:0'});
+    var nameLine=el('div',{style:'display:flex;align-items:center;gap:4px;flex-wrap:wrap'});
+    nameLine.appendChild(el('span',{class:x.cut?'cut-name':'',text:x.golfer}));
+    var os=el('span',{style:'font-size:11px;color:var(--ink-soft)'});os.textContent='('+owner+')';
+    nameLine.appendChild(os);
+    left.appendChild(nameLine);
+    if(!x.cut){
+      var dl=golferDetailStr(nk);
+      if(dl) left.appendChild(el('div',{class:'gscore-detail',text:dl}));
+    }
+    row.appendChild(left);
+    if(isCommissioner){
+      var cb=el('button',{type:'button',class:'cut-toggle-btn'+(x.cut?' is-cut':''),text:x.cut?'UNCUT':'CUT'});
+      cb.addEventListener('click',function(){toggleCut(x.golfer);});
+      row.appendChild(cb);
+    }
+    row.appendChild(el('span',{class:x.cut?'cut-x':'sc',text:x.cut?'\u2717':(x.score===undefined?'\u2014':formatScore(x.score))}));
+    mlist.appendChild(row);
+  });
+  manCard.appendChild(mlist);
+  app.appendChild(manCard);
+
+  if(Object.keys(state.alts).length>0) renderAltsCard(app);
+}
+
+function renderMoney(app){
+  var winnerPot=state.wagerWinner*state.numPlayers;
+  var scorePot=state.wagerScore*state.numPlayers;
+  var totalPot=winnerPot+scorePot;
+  var allScored=Object.keys(liveScores).map(function(k){return{key:k,score:liveScores[k]};}).sort(function(a,b){return a.score-b.score;});
+  var tlKey=allScored.length?allScored[0].key:null;
+  var winnerOwners=tlKey?state.players.filter(function(p){return state.picks.some(function(pk){return pk.player===p&&normName(pk.golfer)===tlKey&&!isCut(pk.golfer);});}):[];
+  var results=teamResults().filter(function(r){return r.total!==null;});
+  results.sort(function(a,b){return a.total-b.total;});
+  var scoreLeaders=[];
+  if(results.length){var best=results[0].total;scoreLeaders=results.filter(function(r){return r.total===best;}).map(function(r){return r.player;});}
+  var wph=winnerOwners.length>0,sph=scoreLeaders.length>0;
+  var summary=state.players.map(function(p){
+    var paid=state.wagerWinner+state.wagerScore;
+    var ws=wph&&winnerOwners.indexOf(p)>-1?winnerPot/winnerOwners.length:0;
+    var wr=wph?0:state.wagerWinner;
+    var ss=sph&&scoreLeaders.indexOf(p)>-1?scorePot/scoreLeaders.length:0;
+    var sr=sph?0:state.wagerScore;
+    return{player:p,paid:paid,winnerShare:ws,winnerRefund:wr,scoreShare:ss,scoreRefund:sr,net:(ws+wr+ss+sr)-paid};
+  });
+
+  var hcard=el('div',{class:'money-card'});
+  hcard.appendChild(el('label',{class:'money-pot-label',text:'Total pots'}));
+  [{label:'Tournament winner pot',val:winnerPot},{label:'Lowest team score pot',val:scorePot},{label:'Total pool',val:totalPot,bold:true}].forEach(function(r){
+    var row=el('div',{class:'money-row'});
+    row.appendChild(el('span',{style:r.bold?'font-weight:600':'',text:r.label}));
+    row.appendChild(el('span',{class:'money-amount neutral',style:r.bold?'font-weight:600':'',text:'$'+r.val}));
+    hcard.appendChild(row);
+  });
+  hcard.appendChild(el('p',{class:'money-split-note',text:'If a pot has no qualifying winner, that wager is voided \u2014 everyone keeps their own stake for it.'}));
+  app.appendChild(hcard);
+
+  var sc=el('div',{class:'money-card'});
+  sc.appendChild(el('label',{class:'money-pot-label',text:'Current leaders'}));
+  var r1=el('div',{class:'money-row'});r1.appendChild(el('span',{text:'Tournament leader owned by'}));r1.appendChild(el('span',{style:'font-size:13px;color:var(--ink-soft)',text:winnerOwners.length?winnerOwners.join(' & '):'No one drafted'}));sc.appendChild(r1);
+  var r2=el('div',{class:'money-row'});r2.appendChild(el('span',{text:'Lowest team score'}));r2.appendChild(el('span',{style:'font-size:13px;color:var(--ink-soft)',text:scoreLeaders.length?scoreLeaders.join(' & '):'No scores yet'}));sc.appendChild(r2);
+  app.appendChild(sc);
+
+  app.appendChild(el('label',{class:'field-label',text:'Current money position (if tournament ended now)',style:'display:block;margin:14px 2px 8px'}));
+  summary.sort(function(a,b){return b.net-a.net;});
+  summary.forEach(function(s){
+    var card=el('div',{class:'money-card'});
+    var head=el('div',{class:'money-row',style:'border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:4px'});
+    head.appendChild(el('span',{style:'font-family:\'Playfair Display\',serif;font-size:16px',text:s.player}));
+    head.appendChild(el('span',{class:'money-amount '+(s.net>0?'positive':s.net<0?'negative':'neutral'),text:(s.net>=0?'+':'')+'$'+s.net.toFixed(0)}));
+    card.appendChild(head);
+    [{label:'Amount wagered',val:'-$'+s.paid,col:'var(--ink-soft)'},{label:s.winnerRefund>0?'Winner pot voided (refund)':null,val:s.winnerRefund>0?'+$'+s.winnerRefund.toFixed(0):null,col:'var(--ink-soft)'},{label:s.scoreRefund>0?'Score pot voided (refund)':null,val:s.scoreRefund>0?'+$'+s.scoreRefund.toFixed(0):null,col:'var(--ink-soft)'},{label:s.winnerShare>0?'Tournament winner pot'+(winnerOwners.length>1?' (split)':''):null,val:s.winnerShare>0?'+$'+s.winnerShare.toFixed(0):null,col:'#1a5c2e'},{label:s.scoreShare>0?'Low score pot'+(scoreLeaders.length>1?' (split)':''):null,val:s.scoreShare>0?'+$'+s.scoreShare.toFixed(0):null,col:'#1a5c2e'}].forEach(function(r){
+      if(!r.label) return;
+      var row=el('div',{class:'money-row',style:'font-size:13px'});
+      row.appendChild(el('span',{style:'color:'+r.col,text:r.label}));
+      row.appendChild(el('span',{style:'color:'+r.col,text:r.val}));
+      card.appendChild(row);
+    });
+    app.appendChild(card);
+  });
+}
+
+var liveDisplayNames={};
+
+function fetchLiveScores(){
+  fetch(ESPN_URL).then(function(r){return r.json();}).then(function(data){
+    liveError=null;
+    var scores={},names={},details={};
+    var ev=data.events&&data.events[0];
+    if(ev){
+      liveTournamentName=ev.name||'';
+      var comp=ev.competitions&&ev.competitions[0];
+      if(comp){
+        liveStatus=(comp.status&&comp.status.type&&comp.status.type.description)||'';
+        (comp.competitors||[]).forEach(function(c){
+          var nm=c.athlete&&(c.athlete.displayName||c.athlete.fullName);
+          if(!nm) return;
+          var key=normName(nm);
+          // Total score
+          var sc=c.score;
+          var num=(sc==='E')?0:parseInt(sc,10);
+          if(!isNaN(num)){scores[key]=num;names[key]=nm;}
+          // Status detail: "Thru 14", "F", "8:45 AM ET", etc.
+          var sType=(c.status&&c.status.type)||{};
+          var statusDesc=sType.description||'';
+          var statusDetail=sType.detail||'';
+          // Today's round score from last linescore
+          var ls=c.linescores||[];
+          var todayRaw=ls.length?(ls[ls.length-1].displayValue||''):'';
+          details[key]={statusDesc:statusDesc,statusDetail:statusDetail,todayRaw:todayRaw};
+        });
+      }
+    }
+    liveScores=scores;liveDisplayNames=names;liveDetails=details;
+    if(state&&state.view==='leaderboard') render();
+  }).catch(function(err){
+    liveError=err;
+    if(state&&state.view==='leaderboard') render();
+  });
+}
+
+loadState();
+initFirebase();
+render();
+fetchLiveScores();
+setInterval(fetchLiveScores,REFRESH_MS);
+
+function loadState(){
+  // handled per-pool in enterPool; this is a no-op at top level now
+  // but we keep the function signature for safety
+}
+})();
+</script>
+</body>
+</html>
