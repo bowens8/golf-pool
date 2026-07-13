@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>The Pool</title>
 <!-- PWA / Add to Home Screen -->
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -33,10 +33,12 @@
   html,body{margin:0;padding:0;}
   body{background:var(--cream);color:var(--ink);font-family:'EB Garamond',Georgia,serif;font-size:17px;line-height:1.5;min-height:100vh;padding-bottom:3rem;}
   h1,h2,h3,.serif-head{font-family:'Playfair Display',Georgia,serif;font-weight:600;letter-spacing:0.01em;}
-  header.top{background:linear-gradient(180deg,var(--masters-green) 0%,var(--masters-green-dark) 100%);color:var(--cream);padding:1.4rem 1.2rem 1.6rem;text-align:center;border-bottom:4px solid var(--masters-gold);position:relative;}
-  header.top .eyebrow{font-family:'EB Garamond',serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 6px;}
-  header.top h1{margin:0;font-size:26px;color:#fff;}
-  header.top .sub{margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.75);}
+  header.top{background:linear-gradient(180deg,var(--masters-green) 0%,var(--masters-green-dark) 100%);color:var(--cream);padding:max(1.4rem, calc(env(safe-area-inset-top) + 0.9rem)) 1.2rem 1.6rem;text-align:center;border-bottom:4px solid var(--masters-gold);position:relative;}
+  header.top .eyebrow{font-family:'EB Garamond',serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 6px;padding:0 90px;}
+  header.top h1{margin:0;font-size:26px;color:#fff;padding:0 90px;}
+  header.top .sub{margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.75);padding:0 90px;}
+  #back-bar{position:absolute;top:max(12px, calc(env(safe-area-inset-top) + 8px));left:12px;}
+  #commish-bar{position:absolute;top:max(12px, calc(env(safe-area-inset-top) + 8px));right:12px;}
   .wrap{max-width:560px;margin:0 auto;padding:0 1rem;}
   .card{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1rem 1.1rem;margin-bottom:0.9rem;}
   .card.tappable{cursor:pointer;transition:border-color 0.15s;}
@@ -134,11 +136,11 @@
 </head>
 <body>
 <header class="top">
-  <div id="back-bar" style="position:absolute;top:12px;left:12px;"></div>
+  <div id="back-bar"></div>
   <p class="eyebrow" id="header-eyebrow">A tradition unlike any other</p>
   <h1>The Pool</h1>
   <p class="sub" id="header-sub">PGA Tour fantasy snake draft</p>
-  <div id="commish-bar" style="position:absolute;top:12px;right:12px;"></div>
+  <div id="commish-bar"></div>
 </header>
 <div class="wrap">
   <div id="app"></div>
@@ -601,6 +603,18 @@ function renderSetup(app){
   var draftDone=state.picks.length>=state.rosterSize*state.numPlayers&&Object.keys(state.alts).length>=state.numPlayers;
   if(isCommissioner){
     if(canStart&&state.picks.length===0){
+      // Randomize order button
+      if(state.players.length>=2){
+        var randBtn=btn('🔀 Randomize draft order',function(){
+          for(var i=state.players.length-1;i>0;i--){
+            var j=Math.floor(Math.random()*(i+1));
+            var tmp=state.players[i];state.players[i]=state.players[j];state.players[j]=tmp;
+          }
+          saveState();render();
+        },'full');
+        randBtn.style.marginBottom='6px';
+        app.appendChild(randBtn);
+      }
       app.appendChild(btn('Start snake draft',function(){state.view='draft';saveState();render();},'primary full'));
     }else if(!canStart){
       var need=Math.max(0,state.rosterSize*state.numPlayers-state.golfers.length);
