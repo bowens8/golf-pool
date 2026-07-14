@@ -277,7 +277,7 @@ var clockExpiredForPickCount=-1;
 
 // Country flag map
 var COUNTRY_FLAGS={
-  'USA':'🇺🇸','England':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Scotland':'🏴󠁧󠁢󠁳󠁣󠁴󠁿','Northern Ireland':'🇬🇧',
+  'USA':'🇺🇸','United States':'🇺🇸','United States of America':'🇺🇸','England':'🏴󠁧󠁢󠁥󠁮󠁧󠁿','Scotland':'🏴󠁧󠁢󠁳󠁣󠁴󠁿','Northern Ireland':'🇬🇧',
   'Wales':'🏴󠁧󠁢󠁷󠁬󠁳󠁿','Republic of Ireland':'🇮🇪','Ireland':'🇮🇪','Australia':'🇦🇺',
   'South Africa':'🇿🇦','Spain':'🇪🇸','Japan':'🇯🇵','South Korea':'🇰🇷','Canada':'🇨🇦',
   'Norway':'🇳🇴','Sweden':'🇸🇪','Germany':'🇩🇪','France':'🇫🇷','Argentina':'🇦🇷',
@@ -287,7 +287,9 @@ var COUNTRY_FLAGS={
   'Switzerland':'🇨🇭','Philippines':'🇵🇭','India':'🇮🇳','Finland':'🇫🇮','Poland':'🇵🇱',
   'Zimbabwe':'🇿🇼','Fiji':'🇫🇯','Malaysia':'🇲🇾','Venezuela':'🇻🇪','Paraguay':'🇵🇾'
 };
-function getFlag(c){return COUNTRY_FLAGS[c]||'';}
+var COUNTRY_DISPLAY={'United States':'USA','United States of America':'USA'};
+function displayCountry(c){return COUNTRY_DISPLAY[c]||c;}
+function getFlag(c){return COUNTRY_FLAGS[c]||COUNTRY_FLAGS[COUNTRY_DISPLAY[c]]||'';}
 
 function getAutoPickForPlayer(playerName,allTaken){
   var available=state.golfers.filter(function(g){return allTaken.indexOf(g)===-1;});
@@ -1611,7 +1613,7 @@ function renderLeaderboard(app){
       if(ownerName) nameCell.appendChild(el('span',{class:'drafted-badge',text:ownerName}));
       var country=d&&d.country?d.country:'';
       var flag=getFlag(country);
-      if(flag||country) nameCell.appendChild(el('span',{class:'tname-sub',text:flag?(flag+' '+country):country}));
+      if(flag||country) nameCell.appendChild(el('span',{class:'tname-sub',text:flag?(flag+' '+displayCountry(country)):displayCountry(country)}));
       if(d&&d.statusDetail) nameCell.appendChild(el('span',{class:'tname-sub',text:d.statusDetail}));
       row.appendChild(nameCell);
       var scoreCol=el('div',{style:'text-align:right;min-width:64px'});
@@ -1682,7 +1684,7 @@ function renderLeaderboard(app){
     var d2=liveDetails[nk]||{};
     var dl=golferDetailStr(nk);
     var ctry=d2.country||'';var cflag=getFlag(ctry);
-    var countryStr=(cflag?(cflag+' '):'')+(ctry||'');
+    var countryStr=(cflag?(cflag+' '):'')+(ctry?displayCountry(ctry):'');
     var detailParts=[];
     if(countryStr) detailParts.push(countryStr);
     if(dl) detailParts.push(dl);
@@ -2063,23 +2065,30 @@ function renderMoney(app){
     {key:'bestBall',label:'Best Ball',winners:bbWinners},
     {key:'points',label:'Points Leaderboard',winners:ptWinners}
   ];
-  var totalPerPlayer=0;
+  // "Total per player" varies per person depending on opt-ins — show the pool totals instead
+  var totalPool=0;
   gameDefs.forEach(function(d){
     if(!g[d.key]||!g[d.key].enabled) return;
-    var pot=g[d.key].wager*state.numPlayers;
-    totalPerPlayer+=g[d.key].wager;
+    var parts=getGameParticipants(d.key);
+    var pot=g[d.key].wager*parts.length;
+    totalPool+=pot;
     var row=el('div',{class:'money-row'});
     var left=el('div');
     left.appendChild(el('div',{text:d.label,style:'font-size:14.5px'}));
-    left.appendChild(el('div',{class:'small-muted',style:'font-size:12px',text:d.winners.length?'Leading: '+d.winners.join(' & '):'No leader yet'}));
+    var subParts=parts.length<state.numPlayers?
+      parts.length+' of '+state.numPlayers+' players \u00b7 ':
+      '';
+    left.appendChild(el('div',{class:'small-muted',style:'font-size:12px',
+      text:subParts+(d.winners.length?'Leading: '+d.winners.join(' & '):'No leader yet')}));
     row.appendChild(left);
     row.appendChild(el('span',{class:'money-amount neutral',text:'$'+pot}));
     hcard.appendChild(row);
   });
   var totRow=el('div',{class:'money-row',style:'border-top:2px solid var(--line);margin-top:4px;padding-top:10px'});
-  totRow.appendChild(el('span',{style:'font-weight:600',text:'Total per player'}));
-  totRow.appendChild(el('span',{class:'money-amount neutral',style:'font-weight:600',text:'$'+totalPerPlayer}));
+  totRow.appendChild(el('span',{style:'font-weight:600',text:'Total pool'}));
+  totRow.appendChild(el('span',{class:'money-amount neutral',style:'font-weight:600',text:'$'+totalPool}));
   hcard.appendChild(totRow);
+  hcard.appendChild(el('p',{class:'money-split-note',text:'Pot sizes reflect only opted-in players. Check the Queue tab to update your opt-ins before the draft starts.'}));
   app.appendChild(hcard);
 
   // ── Per player breakdown ──
@@ -2147,7 +2156,13 @@ function renderMoney(app){
   summary.forEach(function(s){
     var card=el('div',{class:'money-card'});
     var head=el('div',{class:'money-row',style:'border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:4px'});
-    head.appendChild(el('span',{style:'font-family:\'Playfair Display\',serif;font-size:16px',text:s.player}));
+    var nameCol=el('div');
+    nameCol.appendChild(el('span',{style:'font-family:\'Playfair Display\',serif;font-size:16px;display:block',text:s.player}));
+    // Show how much this player is wagering in total
+    var optedIn=activeGames.filter(function(k){return getGameParticipants(k).indexOf(s.player)>-1;});
+    var playerWager=optedIn.reduce(function(sum,k){return sum+g[k].wager;},0);
+    nameCol.appendChild(el('span',{style:'font-size:11px;color:var(--ink-soft)',text:'In for $'+playerWager+' across '+optedIn.length+' game'+(optedIn.length===1?'':'s')}));
+    head.appendChild(nameCol);
     head.appendChild(el('span',{class:'money-amount '+(s.net>0?'positive':s.net<0?'negative':'neutral'),text:(s.net>=0?'+':'')+'$'+s.net.toFixed(0)}));
     card.appendChild(head);
     s.lines.forEach(function(l){
