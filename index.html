@@ -933,27 +933,41 @@ function renderQueue(app){
   }
 
   // Game opt-ins
+  var draftStarted=state.picks.length>0;
   var activeGames=Object.keys(state.games).filter(function(k){return state.games[k].enabled;});
   if(activeGames.length){
     var gcard=el('div',{class:'card'});
-    gcard.appendChild(el('label',{class:'field-label',text:'Games you want to play'}));
+    var gLabel=el('div',{style:'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px'});
+    gLabel.appendChild(el('label',{class:'field-label',style:'margin:0',text:'Games you want to play'}));
+    if(draftStarted) gLabel.appendChild(el('span',{style:'font-size:11px;color:#b0413e;font-weight:600',text:'\uD83D\uDD12 Locked — draft in progress'}));
+    gcard.appendChild(gLabel);
     var pg=state.playerGames[myName]||{};
     var gLabels={lowScore:'Low Team Score',leader:'Tournament Leader',bestBall:'Best Ball',points:'Points Leaderboard'};
     activeGames.forEach(function(k){
-      var row=el('div',{class:'opt-row'});
+      var row=el('div',{class:'opt-row',style:draftStarted?'opacity:0.7;cursor:default':''});
       var cb=el('input',{type:'checkbox'});
       cb.checked=pg[k]!==false;
-      cb.addEventListener('change',function(){
-        if(!state.playerGames[myName]) state.playerGames[myName]={};
-        state.playerGames[myName][k]=this.checked;
-        saveState();
-      });
-      var lbl=el('label',{style:'cursor:pointer;flex:1'});
+      if(draftStarted){
+        cb.disabled=true;
+        cb.style.cursor='not-allowed';
+      } else {
+        cb.addEventListener('change',function(){
+          if(!state.playerGames[myName]) state.playerGames[myName]={};
+          state.playerGames[myName][k]=this.checked;
+          saveState();
+        });
+      }
+      var lbl=el('label',{style:draftStarted?'flex:1;cursor:not-allowed':'cursor:pointer;flex:1'});
       lbl.textContent=gLabels[k]+' — $'+state.games[k].wager+'/player';
-      lbl.addEventListener('click',function(){cb.checked=!cb.checked;cb.dispatchEvent(new Event('change'));});
+      if(!draftStarted){
+        lbl.addEventListener('click',function(){cb.checked=!cb.checked;cb.dispatchEvent(new Event('change'));});
+      }
       row.appendChild(cb);row.appendChild(lbl);
       gcard.appendChild(row);
     });
+    if(draftStarted){
+      gcard.appendChild(el('p',{class:'small-muted',style:'margin-top:8px;font-size:12px',text:'Game selections were locked when the draft started. Contact the commissioner if a change is needed.'}));
+    }
     app.appendChild(gcard);
   }
 
