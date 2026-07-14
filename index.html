@@ -706,7 +706,7 @@ function renderPoolSelect(app){
 
 function renderTabs(app){
   var nav=el('nav',{class:'tabs'});
-  [['setup','Setup'],['draft','Draft'],['queue','Queue'],['leaderboard','Scores'],['bets','Bets'],['money','Money']].forEach(function(t){
+  [['setup','Setup'],['queue','Queue'],['draft','Draft'],['leaderboard','Scores'],['bets','Bets'],['money','Money']].forEach(function(t){
     var b=btn(t[1],function(){state.view=t[0];saveState();render();});
     if(state.view===t[0]) b.classList.add('active');
     nav.appendChild(b);
