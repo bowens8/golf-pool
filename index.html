@@ -246,6 +246,15 @@ var suppressNextWrite=false;
 
 // Multi-pool
 var currentPoolId=null;
+var localView='setup'; // per-device tab — never synced to Firebase
+
+function getLocalView(){
+  try{return localStorage.getItem('lv_'+(currentPoolId||'def'))||'setup';}catch(e){return 'setup';}
+}
+function setLocalView(v){
+  localView=v;
+  try{localStorage.setItem('lv_'+(currentPoolId||'def'),v);}catch(e){}
+}
 var poolsMeta={};
 var poolsMetaConnected=false;
 
@@ -307,7 +316,7 @@ function startClockInterval(){
   stopClockInterval();
   if(!state||!state.pickClockSeconds||!state.clockStartedAt) return;
   clockInterval=setInterval(function(){
-    if(!state||!state.clockStartedAt||state.view!=='draft'){stopClockInterval();return;}
+    if(!state||!state.clockStartedAt||localView!=='draft'){stopClockInterval();return;}
     var elapsed=(Date.now()-state.clockStartedAt)/1000;
     var remaining=Math.max(0,state.pickClockSeconds-elapsed);
     var sec=Math.ceil(remaining);
@@ -449,7 +458,13 @@ function loadLocalState(poolId){
 function saveState(){
   if(!state||!currentPoolId) return;
   try{localStorage.setItem(STORAGE_KEY+'_'+currentPoolId,JSON.stringify(state));}catch(e){}
-  if(firebaseReady&&dbRef){suppressNextWrite=true;dbRef.set(state);}
+  if(firebaseReady&&dbRef){
+    // Strip 'view' before writing to Firebase — tab state is local per device
+    var toWrite=Object.assign({},state);
+    delete toWrite.view;
+    suppressNextWrite=true;
+    dbRef.set(toWrite);
+  }
   if(db&&currentPoolId){
     db.ref('poolsMeta/'+currentPoolId+'/playerCount').set(state.players.length).catch(function(){});
   }
@@ -493,6 +508,7 @@ function enterPool(poolId){
   if(dbRef){dbRef.off();dbRef=null;}
   currentPoolId=poolId;
   state=loadLocalState(poolId);
+  localView=getLocalView(); // restore this device's last tab (local only)
   if(db){
     dbRef=db.ref('pools/'+poolId);
     dbRef.on('value',function(snap){
@@ -515,6 +531,7 @@ function leavePool(){
   if(dbRef){dbRef.off();dbRef=null;}
   currentPoolId=null;
   state=null;
+  localView='setup';
   render();
 }
 
@@ -630,15 +647,15 @@ function render(){
     app.appendChild(tag);
   }
   renderTabs(app);
-  if(state.view==='setup') renderSetup(app);
-  else if(state.view==='draft'){
+  if(localView==='setup') renderSetup(app);
+  else if(localView==='draft'){
     renderDraft(app);
     if(state.clockStartedAt&&!state.locked) startClockInterval();
     else stopClockInterval();
   }
-  else if(state.view==='queue') renderQueue(app);
-  else if(state.view==='bets') renderBets(app);
-  else if(state.view==='money') renderMoney(app);
+  else if(localView==='queue') renderQueue(app);
+  else if(localView==='bets') renderBets(app);
+  else if(localView==='money') renderMoney(app);
   else{stopClockInterval();renderLeaderboard(app);}
 }
 
@@ -707,8 +724,8 @@ function renderPoolSelect(app){
 function renderTabs(app){
   var nav=el('nav',{class:'tabs'});
   [['setup','Setup'],['queue','Queue'],['draft','Draft'],['leaderboard','Scores'],['bets','Bets'],['money','Money']].forEach(function(t){
-    var b=btn(t[1],function(){state.view=t[0];saveState();render();});
-    if(state.view===t[0]) b.classList.add('active');
+    var b=btn(t[1],function(){setLocalView(t[0]);render();});
+    if(localView===t[0]) b.classList.add('active');
     nav.appendChild(b);
   });
   app.appendChild(nav);
@@ -974,7 +991,7 @@ function renderSetup(app){
         randBtn.style.marginBottom='6px';
         app.appendChild(randBtn);
       }
-      app.appendChild(btn('Start snake draft',function(){state.view='draft';state.clockStartedAt=Date.now();saveState();render();},'primary full'));
+      app.appendChild(btn('Start snake draft',function(){setLocalView('draft');state.clockStartedAt=Date.now();saveState();render();},'primary full'));
     }else if(!canStart){
       var need=Math.max(0,state.rosterSize*state.numPlayers-state.golfers.length);
       var msg=state.players.length<state.numPlayers?('Add '+(state.numPlayers-state.players.length)+' more player(s).'):(need>0?('Add '+need+' more golfer(s) \u2014 need '+(state.rosterSize*state.numPlayers)+' total.'):'');
@@ -2174,14 +2191,14 @@ function fetchLiveScores(){
       }
     }
     liveScores=scores;liveDisplayNames=names;liveDetails=details;liveAthleteIds=athleteIds;
-    if(state&&state.view==='leaderboard') render();
+    if(state&&localView==='leaderboard') render();
     // Trigger best ball data fetch if that game is enabled
     if(state&&state.games&&state.games.bestBall&&state.games.bestBall.enabled){
       scheduleBestBallFetch();
     }
   }).catch(function(err){
     liveError=err;
-    if(state&&state.view==='leaderboard') render();
+    if(state&&localView==='leaderboard') render();
   });
 }
 
@@ -2223,7 +2240,7 @@ function fetchBestBallData(){
     }).catch(function(){});
   });
   Promise.all(promises).then(function(){
-    if(state&&(state.view==='leaderboard'||state.view==='money')) render();
+    if(state&&(localView==='leaderboard'||localView==='money')) render();
   });
 }
 
