@@ -327,6 +327,49 @@ function startClockInterval(){
 function getMyName(){return localStorage.getItem('pool_my_name_'+(currentPoolId||'def'))||'';}
 function setMyName(n){localStorage.setItem('pool_my_name_'+(currentPoolId||'def'),n);}
 
+// Queue password auth — stored in sessionStorage (clears when tab/browser closes)
+function queueAuthKey(playerName){return 'qa_'+(currentPoolId||'def')+'_'+playerName;}
+function isQueueAuthed(playerName){return sessionStorage.getItem(queueAuthKey(playerName))==='1';}
+function setQueueAuthed(playerName){sessionStorage.setItem(queueAuthKey(playerName),'1');}
+function clearQueueAuthed(playerName){sessionStorage.removeItem(queueAuthKey(playerName));}
+
+function formatDraftSchedule(iso){
+  if(!iso) return '';
+  try{
+    var d=new Date(iso);
+    var days=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    var months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    var hrs=d.getHours(),mins=d.getMinutes();
+    var ampm=hrs>=12?'PM':'AM';
+    var h=hrs%12||12;
+    var m=mins<10?'0'+mins:mins;
+    return days[d.getDay()]+', '+months[d.getMonth()]+' '+d.getDate()+' at '+h+':'+m+' '+ampm;
+  }catch(e){return iso;}
+}
+
+function draftScheduleBanner(app){
+  if(!state.draftScheduled) return;
+  var now=Date.now();
+  var then=new Date(state.draftScheduled).getTime();
+  var diff=then-now;
+  var formatted=formatDraftSchedule(state.draftScheduled);
+  var banner=el('div',{style:'background:var(--masters-green);color:#fff;border-radius:6px;padding:0.85rem 1rem;margin-bottom:1rem;display:flex;align-items:center;gap:10px'});
+  banner.appendChild(el('span',{style:'font-size:20px',text:'\uD83D\uDDD3\uFE0F'}));
+  var txt=el('div');
+  txt.appendChild(el('p',{style:'margin:0;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--masters-gold-light)',text:'Draft scheduled'}));
+  txt.appendChild(el('p',{style:'margin:0;font-family:\'Playfair Display\',serif;font-size:16px',text:formatted}));
+  if(diff>0){
+    var hrs=Math.floor(diff/3600000);
+    var mins=Math.floor((diff%3600000)/60000);
+    var countdown=hrs>0?(hrs+'h '+mins+'m away'):(mins>0?(mins+'m away'):'Starting soon!');
+    txt.appendChild(el('p',{style:'margin:2px 0 0;font-size:12px;color:var(--masters-gold-light)',text:countdown}));
+  } else {
+    txt.appendChild(el('p',{style:'margin:2px 0 0;font-size:12px;color:var(--masters-gold-light)',text:"It\u2019s draft time!"}));
+  }
+  banner.appendChild(txt);
+  app.appendChild(banner);
+}
+
 function getGameParticipants(gameKey){
   return state.players.filter(function(p){
     var pg=state.playerGames&&state.playerGames[p];
@@ -338,7 +381,8 @@ function getGameParticipants(gameKey){
 var DEFAULT_POINTS_TABLE=[500,300,190,135,110,92,80,70,62,55,48,42,38,34,31,28,25,22,20,18,16,14,12,10,9,8,7,6,5,4,3,2,1];
 function defaultState(){
   return{players:[],golfers:[],picks:[],cuts:{},alts:{},altActive:{},altReplacing:{},locked:false,
-    queues:{},playerGames:{},pickClockSeconds:90,clockStartedAt:null,
+    queues:{},queuePasswords:{},playerGames:{},pickClockSeconds:90,clockStartedAt:null,
+    draftScheduled:null,
     games:{
       lowScore:{enabled:true,wager:25},
       leader:{enabled:true,wager:25},
@@ -362,9 +406,11 @@ function normalizeState(s){
   if(typeof s.topScores!=='number'||s.topScores<1) s.topScores=5;
   if(!Array.isArray(s.challenges)) s.challenges=[];
   if(!s.queues||typeof s.queues!=='object'||Array.isArray(s.queues)) s.queues={};
+  if(!s.queuePasswords||typeof s.queuePasswords!=='object'||Array.isArray(s.queuePasswords)) s.queuePasswords={};
   if(!s.playerGames||typeof s.playerGames!=='object'||Array.isArray(s.playerGames)) s.playerGames={};
   if(typeof s.pickClockSeconds!=='number'||s.pickClockSeconds<10) s.pickClockSeconds=90;
   if(typeof s.clockStartedAt!=='number'&&s.clockStartedAt!==null) s.clockStartedAt=null;
+  if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
   // Games — migrate from old wagerWinner/wagerScore if needed
   if(!s.games||typeof s.games!=='object'||Array.isArray(s.games)){
     s.games={
@@ -406,6 +452,23 @@ function saveState(){
   if(firebaseReady&&dbRef){suppressNextWrite=true;dbRef.set(state);}
   if(db&&currentPoolId){
     db.ref('poolsMeta/'+currentPoolId+'/playerCount').set(state.players.length).catch(function(){});
+  }
+}
+
+// Partial update — only writes this player's queue paths.
+// Using dbRef.update() means two players can save simultaneously without
+// overwriting each other (each touches only their own key in the queues object).
+function savePlayerQueue(playerName){
+  if(!state||!currentPoolId) return;
+  try{localStorage.setItem(STORAGE_KEY+'_'+currentPoolId,JSON.stringify(state));}catch(e){}
+  if(firebaseReady&&dbRef){
+    var updates={};
+    updates['queues/'+playerName]=state.queues[playerName]||null;
+    updates['playerGames/'+playerName]=state.playerGames[playerName]||null;
+    updates['queuePasswords/'+playerName]=
+      (state.queuePasswords&&state.queuePasswords[playerName])||null;
+    // update() is non-destructive — other players' queue paths are untouched
+    dbRef.update(updates).catch(function(){});
   }
 }
 
@@ -863,6 +926,26 @@ function renderSetup(app){
       gamesCard.appendChild(el('p',{class:'small-muted',style:'margin-top:10px',text:'Total per player: $'+totalPerPlayer+' across '+enabledGames.length+' active game'+(enabledGames.length>1?'s':'')+'.'}));
     }
     app.appendChild(gamesCard);
+
+    // Draft schedule
+    var schCard=el('div',{class:'card'});
+    schCard.appendChild(el('label',{class:'field-label',text:'Draft date & time'}));
+    schCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Set when the draft will happen so players see a countdown on the Queue and Draft tabs.'}));
+    var dtRow=el('div',{class:'row-flex'});
+    var dtInput=el('input',{type:'datetime-local',style:'flex:1'});
+    if(state.draftScheduled) dtInput.value=state.draftScheduled;
+    dtInput.addEventListener('change',function(){state.draftScheduled=this.value||null;saveState();render();});
+    dtRow.appendChild(dtInput);
+    if(state.draftScheduled){
+      var clrDt=btn('Clear',function(){state.draftScheduled=null;saveState();render();},'');
+      clrDt.style.cssText='font-size:13px;padding:6px 12px;';
+      dtRow.appendChild(clrDt);
+    }
+    schCard.appendChild(dtRow);
+    if(state.draftScheduled){
+      schCard.appendChild(el('p',{style:'margin:8px 0 0;font-size:13px;color:var(--masters-green)',text:'\uD83D\uDDD3\uFE0F '+formatDraftSchedule(state.draftScheduled)}));
+    }
+    app.appendChild(schCard);
   }else{
     var roCard=el('div',{class:'card'});
     roCard.appendChild(el('label',{class:'field-label',text:'Pool settings'}));
@@ -909,12 +992,15 @@ function renderSetup(app){
 }
 
 function renderQueue(app){
+  draftScheduleBanner(app);
   if(!state.players.length){
     app.appendChild(el('p',{class:'small-muted',text:'Add players in Setup first, then return here to set your queue and game opt-ins.'}));
     return;
   }
   // Name selector (stored locally per device)
   var myName=getMyName();
+  // Use partial Firebase writes — allows two players to edit their queues simultaneously
+  function saveQ(){savePlayerQueue(myName);}
   var ncard=el('div',{class:'card'});
   ncard.appendChild(el('label',{class:'field-label',text:'Who are you?'}));
   var sel=el('select',{style:'width:100%;font-family:\'EB Garamond\',serif;font-size:16px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:var(--cream);color:var(--ink)'});
@@ -929,6 +1015,34 @@ function renderQueue(app){
   app.appendChild(ncard);
   if(!myName){
     app.appendChild(el('p',{class:'small-muted',text:'Select your name above to set your queue and game preferences.'}));
+    return;
+  }
+
+  // ── Password gate ──
+  var hasPassword=!!(state.queuePasswords&&state.queuePasswords[myName]);
+  var authed=isQueueAuthed(myName);
+
+  if(hasPassword&&!authed){
+    // Show password prompt
+    var pwCard=el('div',{class:'card',style:'text-align:center;padding:1.4rem 1.1rem'});
+    pwCard.appendChild(el('p',{style:'font-size:32px;margin:0 0 6px',text:'\uD83D\uDD12'}));
+    pwCard.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:18px;margin:0 0 14px',text:myName+'\u2019s queue is protected'}));
+    var pwInput=el('input',{type:'password',placeholder:'Enter your queue password'});
+    pwCard.appendChild(pwInput);
+    var pwErr=el('p',{style:'color:#b0413e;font-size:13px;margin:6px 0 0;min-height:18px',text:''});
+    pwCard.appendChild(pwErr);
+    var pwBtn=btn('Enter queue',function(){
+      if(pwInput.value===state.queuePasswords[myName]){
+        setQueueAuthed(myName);render();
+      } else {
+        pwErr.textContent='Incorrect password. Try again.';
+        pwInput.value='';pwInput.focus();
+      }
+    },'primary full');
+    pwBtn.style.marginTop='10px';
+    pwCard.appendChild(pwBtn);
+    pwInput.addEventListener('keydown',function(e){if(e.key==='Enter') pwBtn.click();});
+    app.appendChild(pwCard);
     return;
   }
 
@@ -954,7 +1068,7 @@ function renderQueue(app){
         cb.addEventListener('change',function(){
           if(!state.playerGames[myName]) state.playerGames[myName]={};
           state.playerGames[myName][k]=this.checked;
-          saveState();
+          saveQ();
         });
       }
       var lbl=el('label',{style:draftStarted?'flex:1;cursor:not-allowed':'cursor:pointer;flex:1'});
@@ -990,16 +1104,16 @@ function renderQueue(app){
       var btns=el('div',{class:'queue-btns'});
       if(i>0){
         var upBtn=el('button',{type:'button',text:'\u2191'});
-        upBtn.addEventListener('click',function(){var q=state.queues[myName];var t=q[i];q[i]=q[i-1];q[i-1]=t;saveState();render();});
+        upBtn.addEventListener('click',function(){var q=state.queues[myName];var t=q[i];q[i]=q[i-1];q[i-1]=t;saveQ();render();});
         btns.appendChild(upBtn);
       }
       if(i<myQueue.length-1){
         var dnBtn=el('button',{type:'button',text:'\u2193'});
-        dnBtn.addEventListener('click',function(){var q=state.queues[myName];var t=q[i];q[i]=q[i+1];q[i+1]=t;saveState();render();});
+        dnBtn.addEventListener('click',function(){var q=state.queues[myName];var t=q[i];q[i]=q[i+1];q[i+1]=t;saveQ();render();});
         btns.appendChild(dnBtn);
       }
       var rmBtn=el('button',{type:'button',text:'\u2715'});
-      rmBtn.addEventListener('click',function(){state.queues[myName].splice(i,1);saveState();render();});
+      rmBtn.addEventListener('click',function(){state.queues[myName].splice(i,1);saveQ();render();});
       btns.appendChild(rmBtn);
       row.appendChild(btns);
       qcard.appendChild(row);
@@ -1021,7 +1135,7 @@ function renderQueue(app){
         if(!state.queues) state.queues={};
         if(!state.queues[myName]) state.queues[myName]=[];
         state.queues[myName].push(g);
-        saveState();render();
+        saveQ();render();
       });
       qlist.appendChild(b);
     });
@@ -1031,14 +1145,73 @@ function renderQueue(app){
   qcard.appendChild(qlist);
 
   if(myQueue.length){
-    var clr=btn('Clear my queue',function(){state.queues[myName]=[];saveState();render();},'danger');
+    var clr=btn('Clear my queue',function(){state.queues[myName]=[];saveQ();render();},'danger');
     clr.style.cssText='margin-top:8px;font-size:12px;padding:5px 10px;';
     qcard.appendChild(clr);
   }
   app.appendChild(qcard);
+
+  // ── Password management ──
+  var pwMgCard=el('div',{class:'card'});
+  pwMgCard.appendChild(el('label',{class:'field-label',text:hasPassword?'Change or remove your queue password':'Protect your queue with a password'}));
+  pwMgCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 10px',text:hasPassword?'Your queue is currently password-protected. Enter a new password to change it, or remove it to leave your queue open.':'Optional: set a password so only you can edit your pick order and game choices. Passwords reset when the commissioner resets the pool.'}));
+
+  if(hasPassword){
+    // Change password
+    var cpInput=el('input',{type:'password',placeholder:'New password'});
+    var cpInput2=el('input',{type:'password',placeholder:'Confirm new password',style:'margin-top:6px'});
+    pwMgCard.appendChild(cpInput);
+    pwMgCard.appendChild(cpInput2);
+    var cpErr=el('p',{style:'color:#b0413e;font-size:12px;margin:4px 0;min-height:16px',text:''});
+    pwMgCard.appendChild(cpErr);
+    var cpRow=el('div',{class:'row-flex',style:'margin-top:8px'});
+    var cpBtn=btn('Change password',function(){
+      var v=cpInput.value.trim();
+      if(!v){cpErr.textContent='Password cannot be empty.';return;}
+      if(v!==cpInput2.value){cpErr.textContent='Passwords don\u2019t match.';return;}
+      if(!state.queuePasswords) state.queuePasswords={};
+      state.queuePasswords[myName]=v;
+      setQueueAuthed(myName);
+      saveQ();render();
+    },'primary');
+    var rmBtn=btn('Remove password',function(){
+      if(confirm('Remove the password for '+myName+'\u2019s queue? Anyone will be able to edit it.')){
+        delete state.queuePasswords[myName];
+        clearQueueAuthed(myName);
+        saveQ();render();
+      }
+    },'danger');
+    cpRow.appendChild(cpBtn);cpRow.appendChild(rmBtn);
+    pwMgCard.appendChild(cpRow);
+    // Lock out button
+    var lockOutBtn=btn('Lock queue (sign out)',function(){clearQueueAuthed(myName);render();},'');
+    lockOutBtn.style.cssText='margin-top:8px;font-size:12px;padding:5px 10px;width:100%';
+    pwMgCard.appendChild(lockOutBtn);
+  } else {
+    // Set new password
+    var spInput=el('input',{type:'password',placeholder:'Choose a password'});
+    var spInput2=el('input',{type:'password',placeholder:'Confirm password',style:'margin-top:6px'});
+    pwMgCard.appendChild(spInput);
+    pwMgCard.appendChild(spInput2);
+    var spErr=el('p',{style:'color:#b0413e;font-size:12px;margin:4px 0;min-height:16px',text:''});
+    pwMgCard.appendChild(spErr);
+    var spBtn=btn('Set password',function(){
+      var v=spInput.value.trim();
+      if(!v){spErr.textContent='Password cannot be empty.';return;}
+      if(v!==spInput2.value){spErr.textContent='Passwords don\u2019t match.';return;}
+      if(!state.queuePasswords) state.queuePasswords={};
+      state.queuePasswords[myName]=v;
+      setQueueAuthed(myName);
+      saveQ();render();
+    },'primary full');
+    spBtn.style.marginTop='8px';
+    pwMgCard.appendChild(spBtn);
+  }
+  app.appendChild(pwMgCard);
 }
 
 function renderDraft(app){
+  draftScheduleBanner(app);
   if(state.players.length<state.numPlayers||state.golfers.length<state.rosterSize*state.numPlayers){
     app.appendChild(el('p',{class:'small-muted',text:'Finish setup first.'}));return;
   }
