@@ -84,11 +84,11 @@
   .p-last-pick{background:rgba(201,162,39,0.14);border:1px solid var(--masters-gold);border-radius:8px;padding:0.7rem 1.4rem;text-align:center;margin:0 0 16px;width:min(580px,90%);}
   .p-last-pick .pick-label{font-size:clamp(9px,1.1vw,13px);letter-spacing:0.14em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 3px;}
   .p-last-pick .pick-text{font-family:'Playfair Display',serif;font-size:clamp(15px,2.5vw,30px);color:#fff;margin:0;}
-  .p-rosters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;width:100%;margin-top:auto;}
-  .p-roster-card{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.13);border-radius:8px;padding:0.75rem 0.9rem;}
+  .p-rosters{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;width:100%;margin-top:auto;align-items:start;}
+  .p-roster-card{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.13);border-radius:8px;padding:0.75rem 0.9rem;overflow:hidden;}
   .p-roster-card.on-clock{border-color:var(--masters-gold);background:rgba(201,162,39,0.12);}
-  .p-roster-name{font-family:'Playfair Display',serif;font-size:clamp(13px,1.8vw,20px);color:var(--masters-gold-light);margin:0 0 5px;padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.12);}
-  .p-pick-item{font-size:clamp(10px,1.3vw,15px);color:rgba(255,255,255,0.8);padding:1px 0;}
+  .p-roster-name{font-family:'Playfair Display',serif;font-size:clamp(12px,1.8vw,20px);color:var(--masters-gold-light);margin:0 0 5px;padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.12);}
+  .p-pick-item{font-size:clamp(9px,1.1vw,14px);color:rgba(255,255,255,0.8);padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .p-pick-item.fresh{color:var(--masters-gold-light);font-weight:600;}
   .p-exit-btn{position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,0.45);color:rgba(255,255,255,0.65);border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:8px 18px;font-family:'EB Garamond',serif;font-size:14px;cursor:pointer;z-index:10001;touch-action:manipulation;}
   .tv-btn{margin-left:4px;}
@@ -395,16 +395,28 @@ function triggerAutoDraft(){
   if(!state.draftStarted) return;
   var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
   var idx=state.picks.length;
-  if(idx>=mainOrder.length) return;
-  var playerName=state.players[mainOrder[idx]];
   var allTaken=draftedNames().concat(Object.values(state.alts));
-  var pick=getAutoPickForPlayer(playerName,allTaken);
-  if(!pick) return;
-  state.picks.push({player:playerName,golfer:pick,autodrafted:true});
+
+  if(idx<mainOrder.length){
+    // ── Main draft pick ──
+    var playerName=state.players[mainOrder[idx]];
+    var pick=getAutoPickForPlayer(playerName,allTaken);
+    if(!pick) return;
+    state.picks.push({player:playerName,golfer:pick,autodrafted:true});
+  }else{
+    // ── Alt round pick ──
+    var altsPickedSoFar=Object.keys(state.alts).length;
+    if(altsPickedSoFar>=state.numPlayers) return;
+    var altOrder=snakeOrder(state.numPlayers,state.rosterSize+1).slice(state.numPlayers*state.rosterSize);
+    var altPlayer=state.players[altOrder[altsPickedSoFar]];
+    if(!altPlayer) return;
+    var altPick=getAutoPickForPlayer(altPlayer,allTaken);
+    if(!altPick) return;
+    state.alts[altPlayer]=altPick;
+  }
   state.clockStartedAt=Date.now();
   state.clockPaused=false;state.clockPauseRemaining=null;
   saveState();render();
-  // Only chain if more players explicitly have autodraft on
   if(state.autodraftPlayers&&Object.keys(state.autodraftPlayers).some(function(k){return state.autodraftPlayers[k]===true;})){
     checkAndAutoRunNext();
   }
@@ -413,19 +425,31 @@ function triggerAutoDraft(){
 // After any pick, immediately fire for the next player if they have autodraft on
 function checkAndAutoRunNext(){
   if(!state||!state.draftStarted||state.locked) return;
-  // Only proceed if at least one player has autodraft explicitly on
   if(!state.autodraftPlayers||Object.keys(state.autodraftPlayers).length===0) return;
   var anyOn=Object.keys(state.autodraftPlayers).some(function(k){return state.autodraftPlayers[k]===true;});
   if(!anyOn) return;
   var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
   var idx=state.picks.length;
-  if(idx>=mainOrder.length) return;
-  var nextPlayer=state.players[mainOrder[idx]];
-  if(state.autodraftPlayers[nextPlayer]===true){
-    // Brief delay so the UI shows who is on the clock before the pick fires
-    var snapIdx=idx;
+  var altsPickedSoFar=Object.keys(state.alts).length;
+  var altsDone=altsPickedSoFar>=state.numPlayers;
+
+  var nextPlayer;
+  if(idx<mainOrder.length){
+    nextPlayer=state.players[mainOrder[idx]];
+  }else if(!altsDone){
+    var altOrder=snakeOrder(state.numPlayers,state.rosterSize+1).slice(state.numPlayers*state.rosterSize);
+    nextPlayer=state.players[altOrder[altsPickedSoFar]];
+  }else{
+    return; // all done
+  }
+
+  if(nextPlayer&&state.autodraftPlayers[nextPlayer]===true){
+    var snapIdx=idx;var snapAlts=altsPickedSoFar;
     setTimeout(function(){
-      if(!state||!state.draftStarted||state.picks.length!==snapIdx) return;
+      if(!state||!state.draftStarted) return;
+      var nowIdx=state.picks.length;
+      var nowAlts=Object.keys(state.alts).length;
+      if(nowIdx!==snapIdx||nowAlts!==snapAlts) return; // someone else already picked
       if(state.autodraftPlayers&&state.autodraftPlayers[nextPlayer]===true){
         triggerAutoDraft();
       }
@@ -492,7 +516,96 @@ function resetClock(){
 function getMyName(){return localStorage.getItem('pool_my_name_'+(currentPoolId||'def'))||'';}
 function setMyName(n){localStorage.setItem('pool_my_name_'+(currentPoolId||'def'),n);}
 
-// Queue password auth — stored in sessionStorage (clears when tab/browser closes)
+// A player is "logged in" if they've selected their name AND (if they set a queue password) entered it
+function isPlayerLoggedIn(playerName){
+  if(!playerName) return false;
+  var hasPassword=state&&state.queuePasswords&&state.queuePasswords[playerName];
+  return hasPassword?isQueueAuthed(playerName):true;
+}
+
+// Returns true only if the current tab would actually show something different.
+// Prevents Firebase syncs from re-rendering a tab just because an unrelated field changed.
+function shouldRerender(prev,next){
+  if(!prev) return true;
+  // Fields each tab cares about
+  var byTab={
+    setup:  ['players','golfers','numPlayers','rosterSize','topScores','pickClockSeconds','games',
+              'locked','draftStarted','draftScheduled','queuePasswords','queues'],
+    queue:  ['players','golfers','picks','queues','playerGames','bestBallLineups','games',
+              'draftStarted','queuePasswords'],
+    draft:  ['picks','players','alts','altActive','altReplacing','draftStarted','locked',
+              'clockStartedAt','clockPaused','clockEnabled','autodraftPlayers'],
+    leaderboard:['picks','cuts','alts','altActive','altReplacing','players','games',
+                 'bestBallLineups'],
+    bets:   ['challenges','picks','players'],
+    money:  ['picks','cuts','challenges','games','playerGames','players','alts']
+  };
+  var fields=byTab[localView]||Object.keys(next);
+  for(var i=0;i<fields.length;i++){
+    var k=fields[i];
+    if(JSON.stringify(prev[k])!==JSON.stringify(next[k])) return true;
+  }
+  return false;
+}
+
+// Renders a compact "You are: [Name]" bar at the top of tabs that need identity.
+// Returns the verified current player name (or '' if not identified/verified).
+function renderPlayerIdentityBar(app){
+  if(isCommissioner) return ''; // commissioner doesn't need to identify
+  var myName=getMyName();
+  var bar=el('div',{style:'background:var(--cream-2);border-radius:6px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px'});
+
+  if(!myName||!state.players.includes(myName)){
+    // Not identified — show selector
+    bar.appendChild(el('span',{class:'small-muted',text:'Who are you? Select your name to make picks and accept bets.'}));
+    var sel=el('select',{style:'font-family:\'EB Garamond\',serif;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:5px;background:var(--cream)'});
+    sel.appendChild(el('option',{value:'',text:'Select\u2026'}));
+    state.players.forEach(function(p){sel.appendChild(el('option',{value:p,text:p}));});
+    sel.addEventListener('change',function(){
+      var chosen=this.value;if(!chosen) return;
+      setMyName(chosen);
+      // If they have a queue password, need to verify before granting draft rights
+      if(state.queuePasswords&&state.queuePasswords[chosen]&&!isQueueAuthed(chosen)){
+        var pw=prompt('Enter your queue password to log in as '+chosen+':');
+        if(pw===state.queuePasswords[chosen]){setQueueAuthed(chosen);render();}
+        else if(pw!==null){alert('Wrong password.');this.value='';setMyName('');}
+      }else{render();}
+    });
+    bar.appendChild(sel);
+    app.appendChild(bar);
+    return '';
+  }
+
+  // Identified — check password if needed
+  var hasPassword=state.queuePasswords&&state.queuePasswords[myName];
+  var authed=!hasPassword||isQueueAuthed(myName);
+  if(hasPassword&&!authed){
+    bar.appendChild(el('span',{style:'font-size:14px',text:'\uD83D\uDD12 Log in as '+myName+' to draft and accept bets'}));
+    var pwInp=el('input',{type:'password',placeholder:'Your password',style:'flex:1;font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:5px'});
+    bar.appendChild(pwInp);
+    var goBtn=btn('Log in',function(){
+      if(pwInp.value===state.queuePasswords[myName]){setQueueAuthed(myName);render();}
+      else{alert('Wrong password.');}
+    },'primary');
+    goBtn.style.cssText='font-size:13px;padding:6px 12px;flex-shrink:0';
+    pwInp.addEventListener('keydown',function(e){if(e.key==='Enter') goBtn.click();});
+    bar.appendChild(goBtn);
+    app.appendChild(bar);
+    return '';
+  }
+
+  // Fully logged in
+  bar.appendChild(el('span',{style:'font-size:14px',text:'\uD83D\uDC64 You are: '}));
+  bar.appendChild(el('strong',{style:'font-family:\'Playfair Display\',serif;font-size:15px;color:var(--masters-green-dark)',text:myName}));
+  var changeBtn=btn('Not you?',function(){
+    if(hasPassword) clearQueueAuthed(myName);
+    setMyName('');render();
+  },'');
+  changeBtn.style.cssText='font-size:12px;padding:3px 8px;margin-left:auto';
+  bar.appendChild(changeBtn);
+  app.appendChild(bar);
+  return myName;
+}
 function queueAuthKey(playerName){return 'qa_'+(currentPoolId||'def')+'_'+playerName;}
 function isQueueAuthed(playerName){return sessionStorage.getItem(queueAuthKey(playerName))==='1';}
 function setQueueAuthed(playerName){sessionStorage.setItem(queueAuthKey(playerName),'1');}
@@ -711,7 +824,7 @@ function enterPool(poolId){
         var normalized=normalizeState(remote);
         var theirV=normalized.stateVersion||0;
         var ourV=state?(state.stateVersion||0):0;
-        var prevPickLen=state?state.picks.length:-1;
+        var prevState=state?JSON.parse(JSON.stringify(state)):null; // snapshot before applying
         if(theirV>=ourV){
           state=normalized;
           try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
@@ -721,12 +834,13 @@ function enterPool(poolId){
           },300);
           return;
         }
-        // Don't re-render if user is actively typing in a draft search and picks didn't change
-        // (prevents search box glitching when another device syncs a non-pick update)
-        var picksUnchanged=state.picks.length===prevPickLen;
+        // Skip re-render if nothing on the current tab actually changed,
+        // or if the user is actively typing in a draft search
+        if(prevState&&!shouldRerender(prevState,state)) return;
         var activeEl=document.activeElement;
         var userTypingInDraft=localView==='draft'&&activeEl&&activeEl.tagName==='INPUT'&&activeEl.type!=='checkbox';
-        if(picksUnchanged&&userTypingInDraft) return;
+        var picksUnchanged=state.picks.length===(prevState?prevState.picks.length:-1);
+        if(userTypingInDraft&&picksUnchanged) return;
         state=normalized;
         try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
       }else{
@@ -1733,6 +1847,9 @@ function renderDraft(app){
   var altsPickedSoFar=Object.keys(state.alts).length;
   var allTaken=draftedNames().concat(Object.values(state.alts));
 
+  // Player identity bar — non-commissioners must identify to pick
+  var draftIdentity=renderPlayerIdentityBar(app); // '' if not identified, playerName if verified
+
   if(mainDone&&altsDone){
     app.appendChild(el('p',{class:'serif-head',style:'font-size:18px;margin:0 0 12px',text:'Draft complete \u2714'}));
   }else if(!mainDone&&!state.locked){
@@ -1903,12 +2020,12 @@ function renderDraft(app){
   if(state.draftStarted&&!mainDone){
     var adCard=el('div',{class:'card',style:'padding:0.75rem 1rem;margin-top:6px'});
     var adTitle=state.clockEnabled?
-      'Autodraft \u2014 skip the clock, pick from queue instantly':
+      'Autodraft \u2014 skip the clock, pick instantly from queue':
       'Autodraft \u2014 pick from queue automatically (clock is off)';
     adCard.appendChild(el('label',{class:'field-label',style:'margin-bottom:6px',text:adTitle}));
     adCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 10px',text:state.clockEnabled?
-      'Turn on to pick automatically from your queue each round. Turn off to pick manually before the clock runs out.':
-      'Clock is off. Players with autodraft on will have their picks made automatically from their queue.'}));
+      'ON: picks automatically from your queue when your turn starts. OFF: you pick manually — but if the clock runs out, your queue is still used as the tiebreaker.':
+      'Clock is off. Players with autodraft on will pick automatically from their queue each turn.'}));
     state.players.forEach(function(p){
       var isOn=!!(state.autodraftPlayers&&state.autodraftPlayers[p]);
       // Show toggle for: commissioner (all players), or any player for themselves
@@ -2084,17 +2201,32 @@ function renderPresenter(app){
     }
   }
 
-  // Team rosters
+  // Team rosters — dynamic font scaling so all teams always fit on screen
   var rosters=el('div',{class:'p-rosters'});
   var curPlayer=!mainDone&&state.draftStarted?state.players[mainOrder[idx]]:null;
+
+  // Calculate fill level to scale fonts down as picks accumulate
+  var maxPicksOnTeam=state.players.reduce(function(max,p){
+    return Math.max(max,state.picks.filter(function(pk){return pk.player===p;}).length);
+  },0);
+  var fillRatio=state.rosterSize>0?maxPicksOnTeam/state.rosterSize:0;
+  // Font sizes scale from large (empty) down to compact (full roster)
+  var nameFontSize='clamp('+(fillRatio>0.5?'10':'12')+'px,'+(fillRatio>0.7?'1.2':'1.6')+'vw,'+(fillRatio>0.7?'16':'20')+'px)';
+  var pickFontSize='clamp('+(fillRatio>0.7?'8':'9')+'px,'+(fillRatio>0.5?'0.9':'1.1')+'vw,'+(fillRatio>0.7?'11':'14')+'px)';
+  var cardPad=fillRatio>0.7?'0.4rem 0.6rem':fillRatio>0.4?'0.55rem 0.75rem':'0.75rem 0.9rem';
+
   state.players.forEach(function(p){
     var picks=state.picks.filter(function(pk){return pk.player===p;});
-    var rc=el('div',{class:'p-roster-card'+(p===curPlayer?' on-clock':'')});
-    rc.appendChild(el('p',{class:'p-roster-name',text:p+' ('+picks.length+'/'+state.rosterSize+')'}));
+    var rc=el('div',{class:'p-roster-card'+(p===curPlayer?' on-clock':''),style:'padding:'+cardPad});
+    rc.appendChild(el('p',{class:'p-roster-name',style:'font-size:'+nameFontSize+';margin:0 0 4px;padding-bottom:3px',text:p+' ('+picks.length+'/'+state.rosterSize+')'}));
     picks.forEach(function(pk,i){
-      var fresh=i===picks.length-1&&state.picks.indexOf(pk)===state.picks.length-1;
-      rc.appendChild(el('p',{class:'p-pick-item'+(fresh?' fresh':''),text:(i+1)+'. '+pk.golfer}));
+      var isLatest=i===picks.length-1&&state.picks[state.picks.length-1]===pk;
+      rc.appendChild(el('p',{class:'p-pick-item'+(isLatest?' fresh':''),style:'font-size:'+pickFontSize+';padding:0',text:(i+1)+'. '+pk.golfer+(pk.autodrafted?' \u26a1':pk.manual?' \u270e':'')}));
     });
+    if(state.alts[p]){
+      var altEl=el('p',{style:'font-size:'+pickFontSize+';color:var(--masters-gold-light);font-style:italic;padding:2px 0 0',text:'ALT: '+state.alts[p]});
+      rc.appendChild(altEl);
+    }
     rosters.appendChild(rc);
   });
   wrap.appendChild(rosters);
@@ -2429,12 +2561,15 @@ function getBetLeader(ch){
 }
 
 function renderBets(app){
+  // Identity bar — players must be logged in to accept/decline or create bets
+  var myIdentity=renderPlayerIdentityBar(app);
+
   var challenges=state.challenges||[];
   var active=challenges.filter(function(c){return c.status==='active';});
   var pending=challenges.filter(function(c){return c.status==='pending';});
   var declined=challenges.filter(function(c){return c.status==='declined';});
 
-  // ── Money summary ──
+  // ── Money summary (public) ──
   var sumCard=el('div',{class:'card'});
   sumCard.appendChild(el('label',{class:'field-label',text:'Side bet positions (live)'}));
   if(!active.length){
@@ -2447,12 +2582,11 @@ function renderBets(app){
       if(leader==='from'){netMap[ch.from]=(netMap[ch.from]||0)+ch.amount;netMap[ch.to]=(netMap[ch.to]||0)-ch.amount;}
       else if(leader==='to'){netMap[ch.to]=(netMap[ch.to]||0)+ch.amount;netMap[ch.from]=(netMap[ch.from]||0)-ch.amount;}
     });
-    var sorted=Object.keys(netMap).sort(function(a,b){return netMap[b]-netMap[a];});
-    sorted.forEach(function(p){
+    Object.keys(netMap).sort(function(a,b){return netMap[b]-netMap[a];}).forEach(function(p){
       var n=netMap[p];
       var row=el('div',{class:'bet-summary-row'});
       row.appendChild(el('span',{text:p}));
-      row.appendChild(el('span',{class:'bet-net '+(n>0?'up':n<0?'down':'even'),text:(n>0?'+':'')+'\$'+n}));
+      row.appendChild(el('span',{class:'bet-net '+(n>0?'up':n<0?'down':'even'),text:(n>0?'+':'')+'$'+n}));
       sumCard.appendChild(row);
     });
   }
@@ -2461,49 +2595,49 @@ function renderBets(app){
   // ── Pending challenges ──
   if(pending.length){
     app.appendChild(el('label',{class:'field-label',text:'Awaiting response',style:'display:block;margin:4px 2px 8px'}));
-    pending.forEach(function(ch,i){
+    pending.forEach(function(ch){
+      var isTarget=isCommissioner||(myIdentity&&myIdentity===ch.to);
       var card=el('div',{class:'bet-card pending'});
       var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'});
       head.appendChild(el('span',{style:'font-family:\'Playfair Display\',serif;font-size:14px',text:ch.from+' challenges '+ch.to}));
       var tags=el('div',{style:'display:flex;gap:4px'});
       tags.appendChild(el('span',{class:'bet-tag '+(ch.type==='round'?'round':'tournament'),text:ch.type==='round'?'This round':'All remaining rounds'}));
       tags.appendChild(el('span',{class:'bet-tag pending-tag',text:'Pending'}));
-      head.appendChild(tags);
-      card.appendChild(head);
+      head.appendChild(tags);card.appendChild(head);
       var vs=el('div',{class:'bet-vs'});
       var fg=el('div',{class:'bet-golfer'});fg.appendChild(el('div',{class:'bowner',text:ch.from}));fg.appendChild(el('div',{text:ch.fromGolfer}));
-      vs.appendChild(fg);
-      vs.appendChild(el('div',{class:'bet-mid',text:'vs'}));
+      vs.appendChild(fg);vs.appendChild(el('div',{class:'bet-mid',text:'vs'}));
       var tg=el('div',{class:'bet-golfer',style:'text-align:right'});tg.appendChild(el('div',{class:'bowner',text:ch.to}));tg.appendChild(el('div',{text:ch.toGolfer}));
-      vs.appendChild(tg);
-      card.appendChild(vs);
+      vs.appendChild(tg);card.appendChild(vs);
       card.appendChild(el('div',{class:'bet-meta',html:'<strong>$'+ch.amount+' bet</strong>'}));
-      // Accept / Decline buttons — anyone can tap (relies on honesty like the rest of the app)
-      var btnRow=el('div',{class:'row-flex',style:'margin-top:10px'});
-      btnRow.appendChild(el('p',{class:'small-muted',style:'flex:1;margin:0',text:'Challenge for '+ch.to+':'}));
-      var accBtn=btn('Accept',function(){
-        var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
-        if(idx>-1){
-          state.challenges[idx].status='active';
-          if(ch.type==='remaining'){
-            var fk2=normName(ch.fromGolfer),tk2=normName(ch.toGolfer);
-            state.challenges[idx].fromStartScore=liveScores.hasOwnProperty(fk2)?liveScores[fk2]:null;
-            state.challenges[idx].toStartScore=liveScores.hasOwnProperty(tk2)?liveScores[tk2]:null;
+      if(isTarget){
+        var btnRow=el('div',{class:'row-flex',style:'margin-top:10px'});
+        var accBtn=btn('Accept',function(){
+          var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
+          if(idx>-1){
+            state.challenges[idx].status='active';
+            if(ch.type==='remaining'){
+              var fk2=normName(ch.fromGolfer),tk2=normName(ch.toGolfer);
+              state.challenges[idx].fromStartScore=liveScores.hasOwnProperty(fk2)?liveScores[fk2]:null;
+              state.challenges[idx].toStartScore=liveScores.hasOwnProperty(tk2)?liveScores[tk2]:null;
+            }
+            saveState();render();
           }
-          saveState();render();
-        }
-      },'primary');
-      var decBtn=btn('Decline',function(){
-        var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
-        if(idx>-1){state.challenges[idx].status='declined';saveState();render();}
-      },'danger');
-      btnRow.appendChild(accBtn);btnRow.appendChild(decBtn);
-      card.appendChild(btnRow);
+        },'primary');
+        var decBtn=btn('Decline',function(){
+          var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
+          if(idx>-1){state.challenges[idx].status='declined';saveState();render();}
+        },'danger');
+        btnRow.appendChild(accBtn);btnRow.appendChild(decBtn);card.appendChild(btnRow);
+      }else{
+        var waitMsg=!myIdentity?'Log in as '+ch.to+' to accept or decline this challenge.':'Awaiting '+ch.to+'\u2019s response\u2026';
+        card.appendChild(el('p',{class:'small-muted',style:'margin-top:8px;font-style:italic',text:waitMsg}));
+      }
       app.appendChild(card);
     });
   }
 
-  // ── Active bets ──
+  // ── Active bets (public status, commissioner-only settle) ──
   if(active.length){
     app.appendChild(el('label',{class:'field-label',text:'Active bets',style:'display:block;margin:10px 2px 8px'}));
     active.forEach(function(ch){
@@ -2514,73 +2648,51 @@ function renderBets(app){
       var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'});
       var headText=push?'All square':leader===null?'Scores loading\u2026':(leader==='from'?ch.from:ch.to)+' leading';
       head.appendChild(el('span',{style:'font-size:13px;color:var(--ink-soft)',text:headText}));
-      var tags=el('div',{style:'display:flex;gap:4px'});
-      tags.appendChild(el('span',{class:'bet-tag '+(ch.type==='round'?'round':'tournament'),text:ch.type==='round'?'This round':'All remaining rounds'}));
-      tags.appendChild(el('span',{style:'font-size:13px;font-family:\'Playfair Display\',serif;font-weight:600',text:'$'+ch.amount}));
-      head.appendChild(tags);
-      card.appendChild(head);
-      var vs=el('div',{class:'bet-vs'});
-      var fg=el('div',{class:'bet-golfer'+(fWin?' winning':tWin?' losing':'')});
-      fg.appendChild(el('div',{class:'bowner',text:ch.from}));
-      fg.appendChild(el('div',{text:ch.fromGolfer}));
-      var fsDisp=scores.fs===null?'\u2014':formatScore(scores.fs);
-      fg.appendChild(el('div',{class:'bscore',text:fsDisp}));
-      vs.appendChild(fg);
-      vs.appendChild(el('div',{class:'bet-mid',text:'vs'}));
-      var tg=el('div',{class:'bet-golfer'+(tWin?' winning':fWin?' losing':''),style:'text-align:right'});
-      tg.appendChild(el('div',{class:'bowner',text:ch.to}));
-      tg.appendChild(el('div',{text:ch.toGolfer}));
-      var tsDisp=scores.ts===null?'\u2014':formatScore(scores.ts);
-      tg.appendChild(el('div',{class:'bscore',text:tsDisp}));
-      vs.appendChild(tg);
-      card.appendChild(vs);
-      // Score type note
-      var noteText=ch.type==='round'?'Comparing today\'s round scores (to par)':'Comparing scores from when bet was accepted to end of tournament';
+      var tags2=el('div',{style:'display:flex;gap:4px'});
+      tags2.appendChild(el('span',{class:'bet-tag '+(ch.type==='round'?'round':'tournament'),text:ch.type==='round'?'This round':'All remaining rounds'}));
+      tags2.appendChild(el('span',{style:'font-size:13px;font-family:\'Playfair Display\',serif;font-weight:600',text:'$'+ch.amount}));
+      head.appendChild(tags2);card.appendChild(head);
+      var vs2=el('div',{class:'bet-vs'});
+      var fg2=el('div',{class:'bet-golfer'+(fWin?' winning':tWin?' losing':'')});
+      fg2.appendChild(el('div',{class:'bowner',text:ch.from}));fg2.appendChild(el('div',{text:ch.fromGolfer}));
+      fg2.appendChild(el('div',{class:'bscore',text:scores.fs===null?'\u2014':formatScore(scores.fs)}));
+      vs2.appendChild(fg2);vs2.appendChild(el('div',{class:'bet-mid',text:'vs'}));
+      var tg2=el('div',{class:'bet-golfer'+(tWin?' winning':fWin?' losing':''),style:'text-align:right'});
+      tg2.appendChild(el('div',{class:'bowner',text:ch.to}));tg2.appendChild(el('div',{text:ch.toGolfer}));
+      tg2.appendChild(el('div',{class:'bscore',text:scores.ts===null?'\u2014':formatScore(scores.ts)}));
+      vs2.appendChild(tg2);card.appendChild(vs2);
+      var noteText=ch.type==='round'?'Comparing today\u2019s round scores':'Comparing scores from when bet was accepted';
       if(!ch.winner) card.appendChild(el('p',{class:'small-muted',style:'margin-top:4px;font-size:11px',text:noteText}));
-
-      // Settle buttons — visible on all bets without a stored winner
-      if(!ch.winner){
+      if(ch.winner){
+        var winnerName=ch.winner==='push'?'Push (no money changes hands)':ch.winner==='from'?ch.from+' wins $'+ch.amount:ch.to+' wins $'+ch.amount;
+        var settled=el('div',{style:'margin-top:8px;background:'+(ch.winner==='push'?'var(--cream-2)':'rgba(0,89,44,0.08)')+';border-radius:4px;padding:7px 10px;font-size:13px;font-weight:600;color:'+(ch.winner==='push'?'var(--ink-soft)':'var(--masters-green-dark)')});
+        settled.textContent='\u2714 Settled: '+winnerName;
+        card.appendChild(settled);
+        if(isCommissioner){
+          var unsettleBtn=btn('Undo settle',function(){var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});if(idx>-1){delete state.challenges[idx].winner;saveState();render();}},'');
+          unsettleBtn.style.cssText='font-size:11px;padding:3px 8px;margin-top:4px;';
+          card.appendChild(unsettleBtn);
+        }
+      }else if(isCommissioner){
         var settleWrap=el('div',{style:'margin-top:10px;border-top:1px solid var(--line);padding-top:10px'});
-        settleWrap.appendChild(el('p',{class:'small-muted',style:'margin:0 0 6px;font-size:11.5px',text:'Settle this bet (locks in the result so it survives score resets):'}));
+        settleWrap.appendChild(el('p',{class:'small-muted',style:'margin:0 0 6px;font-size:11.5px',text:'Commissioner: settle this bet to lock in the result.'}));
         var settleBtnRow=el('div',{class:'row-flex'});
-        [[ch.from+' wins','from'],['\uD83E\uDD1D Push','push'],[ch.to+' wins','to']].forEach(function(opt){
+        [[ch.from+' wins','from'],'push',[ch.to+' wins','to']].forEach(function(opt){
+          if(opt==='push') opt=['\uD83E\uDD1D Push','push'];
           var sb=btn(opt[0],function(){
             var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
-            if(idx>-1){
-              if(confirm('Settle: '+opt[0]+'? This locks the result permanently.')){
-                state.challenges[idx].winner=opt[1];
-                saveState();render();
-              }
-            }
+            if(idx>-1&&confirm('Settle: '+opt[0]+'? This locks the result permanently.')){state.challenges[idx].winner=opt[1];saveState();render();}
           },opt[1]==='push'?'':'');
           sb.style.cssText='flex:1;font-size:12px;padding:5px 4px;';
           if(opt[1]==='from'||opt[1]==='to') sb.classList.add('primary');
           settleBtnRow.appendChild(sb);
         });
-        settleWrap.appendChild(settleBtnRow);
-        card.appendChild(settleWrap);
+        settleWrap.appendChild(settleBtnRow);card.appendChild(settleWrap);
       }else{
-        // Show settled result banner
-        var winnerName=ch.winner==='push'?'Push (no money changes hands)':ch.winner==='from'?ch.from+' wins $'+ch.amount:ch.to+' wins $'+ch.amount;
-        var settled=el('div',{style:'margin-top:8px;background:'+(ch.winner==='push'?'var(--cream-2)':'rgba(0,89,44,0.08)')+';border-radius:4px;padding:7px 10px;font-size:13px;font-weight:600;color:'+(ch.winner==='push'?'var(--ink-soft)':'var(--masters-green-dark)')});
-        settled.textContent='\u2714 Settled: '+winnerName;
-        card.appendChild(settled);
-        // Allow unsettling (commissioner only, in case of error)
-        if(isCommissioner){
-          var unsettleBtn=btn('Undo settle',function(){
-            var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
-            if(idx>-1){delete state.challenges[idx].winner;saveState();render();}
-          },'');
-          unsettleBtn.style.cssText='font-size:11px;padding:3px 8px;margin-top:4px;';
-          card.appendChild(unsettleBtn);
-        }
+        card.appendChild(el('p',{class:'small-muted',style:'margin-top:8px;font-size:11.5px',text:'The commissioner will rule the winner when the bet concludes.'}));
       }
-      // Cancel / delete (commissioner or owner)
       if(isCommissioner){
-        var delBtn2=btn('Remove bet',function(){
-          var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
-          if(idx>-1){state.challenges.splice(idx,1);saveState();render();}
-        },'danger');
+        var delBtn2=btn('Remove bet',function(){var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});if(idx>-1){state.challenges.splice(idx,1);saveState();render();}},'danger');
         delBtn2.style.cssText='font-size:12px;padding:4px 10px;margin-top:8px;';
         card.appendChild(delBtn2);
       }
@@ -2588,26 +2700,16 @@ function renderBets(app){
     });
   }
 
-  // ── Declined (collapsed) ──
+  // ── Declined (public, collapsed) ──
   if(declined.length){
     var decLabel=el('p',{class:'small-muted',style:'margin:10px 2px 4px;cursor:pointer',text:'\u25b6 '+declined.length+' declined bet'+(declined.length>1?'s':'')});
     var decList=el('div',{style:'display:none'});
-    decLabel.addEventListener('click',function(){
-      var open=decList.style.display==='block';
-      decList.style.display=open?'none':'block';
-      decLabel.textContent=(open?'\u25b6':'\u25bc')+' '+declined.length+' declined bet'+(declined.length>1?'s':'');
-    });
+    decLabel.addEventListener('click',function(){var open=decList.style.display==='block';decList.style.display=open?'none':'block';decLabel.textContent=(open?'\u25b6':'\u25bc')+' '+declined.length+' declined bet'+(declined.length>1?'s':'');});
     app.appendChild(decLabel);
     declined.forEach(function(ch){
       var card=el('div',{class:'bet-card declined'});
       card.appendChild(el('p',{style:'font-size:13px;margin:0',text:ch.from+' vs '+ch.to+' \u2014 '+ch.fromGolfer+' vs '+ch.toGolfer+' ($'+ch.amount+') \u2014 Declined'}));
-      if(isCommissioner){
-        var rb=btn('Remove',function(){
-          var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});
-          if(idx>-1){state.challenges.splice(idx,1);saveState();render();}
-        },'danger');rb.style.cssText='font-size:11px;padding:3px 8px;margin-top:6px;';
-        card.appendChild(rb);
-      }
+      if(isCommissioner){var rb=btn('Remove',function(){var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});if(idx>-1){state.challenges.splice(idx,1);saveState();render();}},'danger');rb.style.cssText='font-size:11px;padding:3px 8px;margin-top:6px;';card.appendChild(rb);}
       decList.appendChild(card);
     });
     app.appendChild(decList);
