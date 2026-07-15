@@ -71,6 +71,27 @@
   .golfer-btn{display:block;width:100%;text-align:left;padding:10px 12px;margin-bottom:5px;border:1px solid var(--line);border-radius:5px;background:#fff;font-family:'EB Garamond',serif;font-size:15px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:rgba(0,89,44,0.12);user-select:none;-webkit-user-select:none;transition:background 0.1s,border-color 0.1s;}
   .golfer-btn:active,.golfer-btn.tapped{background:var(--cream-2);border-color:var(--masters-green);}
   .pick-processing{opacity:0.45;pointer-events:none;}
+  /* Presenter / TV mode */
+  .presenter-wrap{position:fixed;top:0;left:0;right:0;bottom:0;background:linear-gradient(160deg,var(--masters-green-dark) 0%,var(--masters-green) 100%);color:#fff;z-index:9999;overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:2.5vh 4vw 80px;font-family:'EB Garamond',Georgia,serif;}
+  .p-eyebrow{font-size:clamp(10px,1.4vw,14px);letter-spacing:0.25em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 4px;text-align:center;}
+  .p-pool-name{font-family:'Playfair Display',serif;font-size:clamp(22px,4.5vw,60px);text-align:center;color:#fff;margin:0 0 10px;border-bottom:3px solid var(--masters-gold);padding-bottom:10px;width:100%;}
+  .p-round-label{text-align:center;font-size:clamp(12px,1.8vw,22px);letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.55);margin:0 0 6px;}
+  .p-sub-label{text-align:center;font-size:clamp(13px,1.8vw,22px);color:rgba(255,255,255,0.45);margin:-6px 0 12px;}
+  .p-on-clock{font-family:'Playfair Display',serif;font-size:clamp(32px,8vw,100px);text-align:center;color:#fff;margin:0;line-height:1.1;}
+  .p-clock-num{font-family:'Playfair Display',serif;font-size:clamp(44px,9vw,120px);font-weight:700;text-align:center;line-height:1;transition:color 0.5s;margin:6px 0;}
+  .p-clock-bar-wrap{height:10px;background:rgba(255,255,255,0.15);border-radius:5px;overflow:hidden;margin:6px auto 16px;width:min(500px,80%);}
+  .p-clock-bar{height:100%;border-radius:5px;transition:width 0.25s linear,background 0.5s;}
+  .p-last-pick{background:rgba(201,162,39,0.14);border:1px solid var(--masters-gold);border-radius:8px;padding:0.7rem 1.4rem;text-align:center;margin:0 0 16px;width:min(580px,90%);}
+  .p-last-pick .pick-label{font-size:clamp(9px,1.1vw,13px);letter-spacing:0.14em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 3px;}
+  .p-last-pick .pick-text{font-family:'Playfair Display',serif;font-size:clamp(15px,2.5vw,30px);color:#fff;margin:0;}
+  .p-rosters{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;width:100%;margin-top:auto;}
+  .p-roster-card{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.13);border-radius:8px;padding:0.75rem 0.9rem;}
+  .p-roster-card.on-clock{border-color:var(--masters-gold);background:rgba(201,162,39,0.12);}
+  .p-roster-name{font-family:'Playfair Display',serif;font-size:clamp(13px,1.8vw,20px);color:var(--masters-gold-light);margin:0 0 5px;padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,0.12);}
+  .p-pick-item{font-size:clamp(10px,1.3vw,15px);color:rgba(255,255,255,0.8);padding:1px 0;}
+  .p-pick-item.fresh{color:var(--masters-gold-light);font-weight:600;}
+  .p-exit-btn{position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,0.45);color:rgba(255,255,255,0.65);border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:8px 18px;font-family:'EB Garamond',serif;font-size:14px;cursor:pointer;z-index:10001;touch-action:manipulation;}
+  .tv-btn{margin-left:4px;}
   .roster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
   .roster-card{background:var(--cream-2);border-radius:5px;padding:8px 10px;}
   .roster-card .pname{font-family:'Playfair Display',serif;font-size:13px;margin:0 0 4px;color:var(--masters-green-dark);}
@@ -276,6 +297,7 @@ var liveError=null;
 var clockInterval=null;
 var clockExpiredForPickCount=-1;
 var pickInProgress=false; // debounce flag — prevents double-tap double-picks
+var presenterMode=false;
 
 // Country flag map
 var COUNTRY_FLAGS={
@@ -338,17 +360,23 @@ function stopClockInterval(){if(clockInterval){clearInterval(clockInterval);cloc
 
 function startClockInterval(){
   stopClockInterval();
-  if(!state||!state.pickClockSeconds||!state.clockStartedAt||state.clockPaused) return;
+  if(!state||!state.pickClockSeconds||!state.clockStartedAt||state.clockPaused||!state.clockEnabled) return;
   clockInterval=setInterval(function(){
-    if(!state||!state.clockStartedAt||localView!=='draft'||state.clockPaused){stopClockInterval();return;}
+    if(!state||!state.clockStartedAt||(localView!=='draft'&&!presenterMode)||state.clockPaused||!state.clockEnabled){stopClockInterval();return;}
     var elapsed=(Date.now()-state.clockStartedAt)/1000;
     var remaining=Math.max(0,state.pickClockSeconds-elapsed);
     var sec=Math.ceil(remaining);
     var col=sec<=10?'#b0413e':sec<=30?'#c9a227':'#00592c';
+    // Update draft tab clock
     var cn=document.getElementById('draft-clock-num');
     if(cn){cn.textContent=sec+'s';cn.style.color=col;}
     var cb=document.getElementById('draft-clock-bar');
     if(cb){cb.style.width=((remaining/state.pickClockSeconds)*100)+'%';cb.style.background=col;}
+    // Update presenter clock
+    var pcn=document.getElementById('presenter-clock-num');
+    if(pcn){pcn.textContent=sec+'s';pcn.style.color=col;}
+    var pcb=document.getElementById('presenter-clock-bar');
+    if(pcb){pcb.style.width=((remaining/state.pickClockSeconds)*100)+'%';pcb.style.background=col;}
     if(remaining<=0&&clockExpiredForPickCount!==state.picks.length){
       clockExpiredForPickCount=state.picks.length;
       stopClockInterval();
@@ -443,6 +471,7 @@ function defaultState(){
   return{players:[],golfers:[],picks:[],cuts:{},alts:{},altActive:{},altReplacing:{},locked:false,
     queues:{},queuePasswords:{},playerGames:{},pickClockSeconds:90,clockStartedAt:null,
     clockPaused:false,clockPauseRemaining:null,draftStarted:false,autodraftPlayers:{},
+    clockEnabled:true,
     draftScheduled:null,
     games:{
       lowScore:{enabled:true,wager:25},
@@ -474,7 +503,8 @@ function normalizeState(s){
   if(typeof s.clockPaused!=='boolean') s.clockPaused=false;
   if(typeof s.clockPauseRemaining!=='number'&&s.clockPauseRemaining!==null) s.clockPauseRemaining=null;
   if(typeof s.draftStarted!=='boolean') s.draftStarted=s.picks&&s.picks.length>0;
-  if(!s.autodraftPlayers||typeof s.autodraftPlayers!=='object'||Array.isArray(s.autodraftPlayers)) s.autodraftPlayers={}; // migrate: if picks exist, draft was started
+  if(!s.autodraftPlayers||typeof s.autodraftPlayers!=='object'||Array.isArray(s.autodraftPlayers)) s.autodraftPlayers={};
+  if(typeof s.clockEnabled!=='boolean') s.clockEnabled=true;
   if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
   // Games — migrate from old wagerWinner/wagerScore if needed
   if(!s.games||typeof s.games!=='object'||Array.isArray(s.games)){
@@ -659,9 +689,17 @@ function renderCommishBar(){
   if(!bar) return;
   bar.innerHTML='';
   if(isCommissioner){
+    var wrap=el('div',{style:'display:flex;gap:5px;align-items:center'});
+    var tvb=el('button',{type:'button',class:'commish-btn tv-btn'+(presenterMode?' active':''),text:presenterMode?'\uD83D\uDCFA Exit TV':'\uD83D\uDCFA TV'});
+    tvb.addEventListener('click',function(){
+      if(currentPoolId&&state){presenterMode=!presenterMode;render();}
+      else alert('Enter a pool first.');
+    });
+    wrap.appendChild(tvb);
     var b=el('button',{type:'button',class:'commish-btn active',text:'\uD83D\uDD12 Commish'});
-    b.addEventListener('click',function(){if(confirm('Log out of commissioner mode?')){isCommissioner=false;render();}});
-    bar.appendChild(b);
+    b.addEventListener('click',function(){if(confirm('Log out of commissioner mode?')){isCommissioner=false;presenterMode=false;render();}});
+    wrap.appendChild(b);
+    bar.appendChild(wrap);
   }else{
     var b2=el('button',{type:'button',class:'commish-btn',text:'Commish login'});
     b2.addEventListener('click',function(){
@@ -698,7 +736,7 @@ function updateHeader(){
 }
 
 function render(){
-  pickInProgress=false; // always reset on render so taps can never get permanently stuck
+  pickInProgress=false;
   var app=document.getElementById('app');
   app.innerHTML='';
   renderCommishBar();
@@ -706,6 +744,12 @@ function render(){
   updateHeader();
   if(currentPoolId===null){
     renderPoolSelect(app);
+    return;
+  }
+  // Presenter / TV mode — full screen overlay, skip normal UI
+  if(presenterMode&&state){
+    renderPresenter(app);
+    if(state.draftStarted&&state.clockEnabled&&!state.clockPaused) startClockInterval();
     return;
   }
   if(!firebaseReady){
@@ -722,7 +766,7 @@ function render(){
   if(localView==='setup') renderSetup(app);
   else if(localView==='draft'){
     renderDraft(app);
-    if(state.clockStartedAt&&!state.locked&&!state.clockPaused) startClockInterval();
+    if(state.clockStartedAt&&!state.locked&&!state.clockPaused&&state.clockEnabled) startClockInterval();
     else stopClockInterval();
   }
   else if(localView==='queue') renderQueue(app);
@@ -1364,21 +1408,38 @@ function renderDraft(app){
   // ── Commissioner controls panel ──
   if(isCommissioner&&state.draftStarted&&!state.locked){
     var ctrlCard=el('div',{class:'card',style:'padding:0.75rem 1rem;margin-bottom:0.75rem'});
-    ctrlCard.appendChild(el('label',{class:'field-label',style:'margin-bottom:6px',text:'Commissioner controls'}));
-    var ctrlRow=el('div',{class:'row-flex',style:'gap:6px;flex-wrap:wrap'});
-    if(state.clockPaused){
-      var resumeBtn=btn('\u25b6 Resume clock',function(){resumeClock();},'primary');
-      resumeBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
-      ctrlRow.appendChild(resumeBtn);
-    }else{
-      var pauseBtn=btn('\u23f8 Pause clock',function(){pauseClock();},'');
-      pauseBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
-      ctrlRow.appendChild(pauseBtn);
+    ctrlCard.appendChild(el('label',{class:'field-label',style:'margin-bottom:8px',text:'Commissioner controls'}));
+    // Clock on/off toggle
+    var clkRow=el('div',{style:'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--line)'});
+    clkRow.appendChild(el('span',{style:'font-size:14px',text:'Pick clock'}));
+    var clkRight=el('div',{style:'display:flex;align-items:center;gap:8px'});
+    clkRight.appendChild(el('span',{class:'small-muted',text:state.clockEnabled?'ON':'OFF'}));
+    var clkTog=el('button',{type:'button',class:'game-toggle-btn'+(state.clockEnabled?' on':'')});
+    clkTog.addEventListener('click',function(){
+      state.clockEnabled=!state.clockEnabled;
+      if(!state.clockEnabled){state.clockPaused=false;state.clockPauseRemaining=null;}
+      saveState();render();
+    });
+    clkRight.appendChild(clkTog);
+    clkRow.appendChild(clkRight);
+    ctrlCard.appendChild(clkRow);
+    // Clock action buttons (only when clock is on)
+    if(state.clockEnabled){
+      var ctrlRow=el('div',{class:'row-flex',style:'gap:6px;flex-wrap:wrap'});
+      if(state.clockPaused){
+        var resumeBtn=btn('\u25b6 Resume clock',function(){resumeClock();},'primary');
+        resumeBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
+        ctrlRow.appendChild(resumeBtn);
+      }else{
+        var pauseBtn=btn('\u23f8 Pause clock',function(){pauseClock();},'');
+        pauseBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
+        ctrlRow.appendChild(pauseBtn);
+      }
+      var resetClockBtn=btn('\u21ba Reset clock',function(){resetClock();},'');
+      resetClockBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
+      ctrlRow.appendChild(resetClockBtn);
+      ctrlCard.appendChild(ctrlRow);
     }
-    var resetClockBtn=btn('\u21ba Reset clock',function(){resetClock();},'');
-    resetClockBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
-    ctrlRow.appendChild(resetClockBtn);
-    ctrlCard.appendChild(ctrlRow);
     app.appendChild(ctrlCard);
   }
 
@@ -1555,32 +1616,38 @@ function renderDraft(app){
   // ── Autodraft toggles ──
   if(state.draftStarted&&!mainDone){
     var adCard=el('div',{class:'card',style:'padding:0.75rem 1rem;margin-top:6px'});
-    adCard.appendChild(el('label',{class:'field-label',style:'margin-bottom:6px',text:'Autodraft \u2014 skip the clock, pick from queue instantly'}));
-    adCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 10px',text:'Turn on to have the system pick automatically from your queue each round. Turn off to pick manually with the clock.'}));
+    var adTitle=state.clockEnabled?
+      'Autodraft \u2014 skip the clock, pick from queue instantly':
+      'Autodraft \u2014 pick from queue automatically (clock is off)';
+    adCard.appendChild(el('label',{class:'field-label',style:'margin-bottom:6px',text:adTitle}));
+    adCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 10px',text:state.clockEnabled?
+      'Turn on to pick automatically from your queue each round. Turn off to pick manually before the clock runs out.':
+      'Clock is off. Players with autodraft on will have their picks made automatically from their queue.'}));
     state.players.forEach(function(p){
       var isOn=!!(state.autodraftPlayers&&state.autodraftPlayers[p]);
+      // Show toggle for: commissioner (all players), or any player for themselves
+      var canToggle=isCommissioner; // commissioner always can; players toggle in Queue tab
       var row=el('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)'});
-      var left=el('div');
+      var left=el('div',{style:'display:flex;align-items:center;gap:8px'});
       left.appendChild(el('span',{style:'font-size:14.5px',text:p}));
-      if(isOn) left.appendChild(el('span',{class:'autodraft-badge',style:'margin-left:6px',text:'autodraft on'}));
+      if(isOn) left.appendChild(el('span',{class:'autodraft-badge',text:'auto on'}));
       row.appendChild(left);
-      // Toggle pill button
-      var togBtn=el('button',{type:'button',class:'game-toggle-btn'+(isOn?' on':''),style:'flex-shrink:0'});
-      togBtn.addEventListener('click',function(){
-        if(!state.autodraftPlayers) state.autodraftPlayers={};
-        state.autodraftPlayers[p]=!isOn;
-        saveState();render();
-        // If we just turned it ON and this player is currently on the clock, fire immediately
-        if(!isOn){
-          var mo=snakeOrder(state.numPlayers,state.rosterSize);
-          var ci=state.picks.length;
-          if(ci<mo.length&&state.players[mo[ci]]===p){
-            checkAndAutoRunNext();
+      if(canToggle){
+        var togBtn=el('button',{type:'button',class:'game-toggle-btn'+(isOn?' on':''),style:'flex-shrink:0'});
+        togBtn.addEventListener('click',function(){
+          if(!state.autodraftPlayers) state.autodraftPlayers={};
+          state.autodraftPlayers[p]=!isOn;
+          saveState();render();
+          if(!isOn){
+            var mo=snakeOrder(state.numPlayers,state.rosterSize);
+            var ci=state.picks.length;
+            if(ci<mo.length&&state.players[mo[ci]]===p) checkAndAutoRunNext();
           }
-        }
-      });
-      row.appendChild(togBtn);
-      row.style.borderBottom='1px solid var(--line)';
+        });
+        row.appendChild(togBtn);
+      }else{
+        row.appendChild(el('span',{class:'small-muted',style:'font-size:12px',text:isOn?'on':'off'}));
+      }
       adCard.appendChild(row);
     });
     app.appendChild(adCard);
@@ -1675,6 +1742,82 @@ function teamResults(){
     var total=hasEnough?topN.reduce(function(s,x){return s+x.score;},0):null;
     return{player:p,top5:topN,rest:rest,total:total,hasEnough:hasEnough,scoredCount:scoredActive.length,activeCount:active.length};
   });
+}
+
+function renderPresenter(app){
+  var mainOrder=state.draftStarted?snakeOrder(state.numPlayers,state.rosterSize):[];
+  var idx=state.picks.length;
+  var mainDone=idx>=mainOrder.length;
+  var wrap=el('div',{class:'presenter-wrap'});
+
+  // Header
+  wrap.appendChild(el('p',{class:'p-eyebrow',text:'A tradition unlike any other'}));
+  var poolName=(currentPoolId&&poolsMeta[currentPoolId]&&poolsMeta[currentPoolId].name)||'The Pool';
+  wrap.appendChild(el('p',{class:'p-pool-name',text:poolName}));
+
+  if(!state.draftStarted){
+    wrap.appendChild(el('p',{class:'p-on-clock',style:'font-size:clamp(24px,5vw,60px)',text:'Draft starting soon\u2026'}));
+    if(state.draftScheduled) wrap.appendChild(el('p',{class:'p-round-label',text:formatDraftSchedule(state.draftScheduled)}));
+  }else if(mainDone){
+    wrap.appendChild(el('p',{class:'p-on-clock',style:'font-size:clamp(24px,5vw,60px)',text:'Draft Complete \u2714'}));
+  }else{
+    var round=Math.floor(idx/state.numPlayers)+1;
+    var total=state.numPlayers*state.rosterSize;
+    wrap.appendChild(el('p',{class:'p-round-label',text:'Round '+round+' \u00b7 Overall Pick '+(idx+1)+' of '+total}));
+
+    var onClockPlayer=state.players[mainOrder[idx]];
+    var hasAutodraft=state.autodraftPlayers&&state.autodraftPlayers[onClockPlayer];
+    wrap.appendChild(el('p',{class:'p-on-clock',text:onClockPlayer}));
+    wrap.appendChild(el('p',{class:'p-sub-label',text:hasAutodraft?'is autodrafting\u2026':'is on the clock'}));
+
+    // Clock
+    if(state.clockEnabled&&state.clockStartedAt&&!state.clockPaused){
+      var elp=(Date.now()-state.clockStartedAt)/1000;
+      var rem=Math.max(0,state.pickClockSeconds-elp);
+      var sec=Math.ceil(rem);
+      var col=sec<=10?'#e53935':sec<=30?'#c9a227':'#66bb6a';
+      wrap.appendChild(el('p',{id:'presenter-clock-num',class:'p-clock-num',style:'color:'+col,text:sec+'s'}));
+      var bw=el('div',{class:'p-clock-bar-wrap'});
+      bw.appendChild(el('div',{id:'presenter-clock-bar',class:'p-clock-bar',style:'width:'+((rem/state.pickClockSeconds)*100)+'%;background:'+col}));
+      wrap.appendChild(bw);
+    }else if(state.clockPaused){
+      wrap.appendChild(el('p',{class:'p-clock-num',style:'color:#c9a227;font-size:clamp(22px,4vw,48px)',text:'\u23f8 Paused'}));
+    }else if(!state.clockEnabled){
+      wrap.appendChild(el('p',{style:'text-align:center;font-size:clamp(12px,1.6vw,18px);color:rgba(255,255,255,0.35);margin:4px 0 12px',text:'No pick clock'}));
+    }
+
+    // Last pick
+    if(state.picks.length>0){
+      var lp=state.picks[state.picks.length-1];
+      var lpNum=state.picks.length;
+      var lpRound=Math.floor((lpNum-1)/state.numPlayers)+1;
+      var lpCard=el('div',{class:'p-last-pick'});
+      lpCard.appendChild(el('p',{class:'pick-label',text:'\u2714 Round '+lpRound+' \u00b7 Pick '+lpNum+(lp.autodrafted?' (auto)':lp.manual?' (manual)':'')}));
+      lpCard.appendChild(el('p',{class:'pick-text',text:lp.golfer+' \u2192 '+lp.player}));
+      wrap.appendChild(lpCard);
+    }
+  }
+
+  // Team rosters
+  var rosters=el('div',{class:'p-rosters'});
+  var curPlayer=!mainDone&&state.draftStarted?state.players[mainOrder[idx]]:null;
+  state.players.forEach(function(p){
+    var picks=state.picks.filter(function(pk){return pk.player===p;});
+    var rc=el('div',{class:'p-roster-card'+(p===curPlayer?' on-clock':'')});
+    rc.appendChild(el('p',{class:'p-roster-name',text:p+' ('+picks.length+'/'+state.rosterSize+')'}));
+    picks.forEach(function(pk,i){
+      var fresh=i===picks.length-1&&state.picks.indexOf(pk)===state.picks.length-1;
+      rc.appendChild(el('p',{class:'p-pick-item'+(fresh?' fresh':''),text:(i+1)+'. '+pk.golfer}));
+    });
+    rosters.appendChild(rc);
+  });
+  wrap.appendChild(rosters);
+
+  // Exit button
+  var exitBtn=el('button',{type:'button',class:'p-exit-btn',text:'\u2715 Exit TV Mode'});
+  exitBtn.addEventListener('click',function(){presenterMode=false;render();});
+  wrap.appendChild(exitBtn);
+  app.appendChild(wrap);
 }
 
 function holeStyle(strokes,par){
