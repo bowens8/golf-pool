@@ -1088,6 +1088,34 @@ function renderSetup(app){
       schCard.appendChild(el('p',{style:'margin:8px 0 0;font-size:13px;color:var(--masters-green)',text:'\uD83D\uDDD3\uFE0F '+formatDraftSchedule(state.draftScheduled)}));
     }
     app.appendChild(schCard);
+
+    // Queue password management — lets commissioner unlock any player
+    var pwdPlayers=state.players.filter(function(p){return state.queuePasswords&&state.queuePasswords[p];});
+    var qmCard=el('div',{class:'card'});
+    qmCard.appendChild(el('label',{class:'field-label',text:'Queue password management'}));
+    if(!pwdPlayers.length){
+      qmCard.appendChild(el('p',{class:'small-muted',text:'No players have set a queue password yet.'}));
+    }else{
+      qmCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Remove a player\'s password if they get locked out. They can set a new one in the Queue tab.'}));
+      pwdPlayers.forEach(function(p){
+        var row=el('div',{class:'list-row'});
+        var left=el('div');
+        left.appendChild(el('span',{text:p}));
+        left.appendChild(el('span',{style:'font-size:12px;color:var(--ink-soft);margin-left:6px',text:'\uD83D\uDD12 password set'}));
+        row.appendChild(left);
+        var rmPwBtn=btn('Remove password',function(){
+          if(confirm('Remove the queue password for '+p+'? They will need to set a new one in the Queue tab.')){
+            delete state.queuePasswords[p];
+            savePlayerQueue(p);
+            render();
+          }
+        },'danger');
+        rmPwBtn.style.cssText='font-size:12px;padding:4px 10px;';
+        row.appendChild(rmPwBtn);
+        qmCard.appendChild(row);
+      });
+    }
+    app.appendChild(qmCard);
   }else{
     var roCard=el('div',{class:'card'});
     roCard.appendChild(el('label',{class:'field-label',text:'Pool settings'}));
