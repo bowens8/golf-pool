@@ -621,6 +621,27 @@ function loadLocalState(poolId){
   }catch(e){}
   return defaultState();
 }
+function performReset(newState){
+  // Stamp a fresh resetAt so all devices recognise this as intentional
+  newState.resetAt=Date.now();
+  state=newState;
+  // Wipe any stale localStorage cache for this pool
+  try{localStorage.removeItem(STORAGE_KEY+'_'+(currentPoolId||'def'));}catch(e){}
+  saveState();
+  render();
+  // Re-push 3 times with increasing delays to win any race against other devices
+  if(firebaseReady&&dbRef){
+    [600,1500,3000].forEach(function(ms){
+      setTimeout(function(){
+        if(state&&state.resetAt===newState.resetAt&&dbRef){
+          var tw=Object.assign({},state);delete tw.view;
+          dbRef.set(tw).catch(function(){});
+        }
+      },ms);
+    });
+  }
+}
+
 function saveState(){
   if(!state||!currentPoolId) return;
   try{localStorage.setItem(STORAGE_KEY+'_'+currentPoolId,JSON.stringify(state));}catch(e){}
@@ -685,19 +706,21 @@ function enterPool(poolId){
       if(suppressNextWrite){suppressNextWrite=false;return;}
       if(remote){
         var normalized=normalizeState(remote);
-        // Safety net: never apply a Firebase state that has fewer picks unless it's
-        // an intentional reset (signalled by a newer resetAt timestamp).
+        // If this is an intentional reset (newer resetAt), always accept it immediately
+        var isIntentionalReset=normalized.resetAt&&(!state||!state.resetAt||normalized.resetAt>state.resetAt);
+        if(isIntentionalReset){
+          state=normalized;
+          try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
+          render();return;
+        }
+        // Safety net: never apply a Firebase state that has fewer picks than we hold locally
+        // (prevents stale writes from rolling back recently-made picks)
         if(state&&Array.isArray(state.picks)&&normalized.picks.length<state.picks.length){
-          var isIntentionalReset=normalized.resetAt&&(!state.resetAt||normalized.resetAt>state.resetAt);
-          if(!isIntentionalReset){
-            // Our local state is ahead — push it back to Firebase to fix the sync
-            setTimeout(function(){
-              var toWrite=Object.assign({},state);delete toWrite.view;
-              dbRef.set(toWrite).catch(function(){});
-            },200);
-            return;
-          }
-          // Fall through — it's a legitimate reset, accept it
+          setTimeout(function(){
+            var toWrite=Object.assign({},state);delete toWrite.view;
+            dbRef.set(toWrite).catch(function(){});
+          },200);
+          return;
         }
         state=normalized;
         try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
@@ -1243,13 +1266,13 @@ function renderSetup(app){
           state.cuts={};state.autodraftPlayers={};
           state.draftStarted=false;state.clockStartedAt=null;
           state.clockPaused=false;state.clockPauseRemaining=null;
-          state.locked=false;state.resetAt=Date.now();
-          saveState();render();
+          state.locked=false;
+          performReset(state);
         }
       },'danger full');
       draftRstBtn.style.marginTop='6px';app.appendChild(draftRstBtn);
     }
-      var rstBtn=btn('Reset everything',function(){if(confirm('Clear all players, golfers, picks and alts?')){state=defaultState();state.resetAt=Date.now();saveState();render();}},'danger full');
+      var rstBtn=btn('Reset everything',function(){if(confirm('Clear all players, golfers, picks and alts?')){performReset(defaultState());}},'danger full');
       rstBtn.style.marginTop='6px';app.appendChild(rstBtn);
     }
   }
@@ -1653,8 +1676,8 @@ function renderDraft(app){
         state.cuts={};state.autodraftPlayers={};
         state.draftStarted=false;state.clockStartedAt=null;
         state.clockPaused=false;state.clockPauseRemaining=null;
-        state.locked=false;state.resetAt=Date.now();
-        saveState();render();
+        state.locked=false;
+        performReset(state);
       }
     },'danger full');
     draftRstBtn2.style.cssText='margin-top:8px;font-size:13px;';
