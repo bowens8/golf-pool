@@ -2313,15 +2313,37 @@ function renderLeaderboard(app){
   manCard.appendChild(mlist);
   app.appendChild(manCard);
 
-  if(Object.keys(state.alts).length>0) renderAltsCard(app);
-
-  // ── Best ball scorecards (one per player per round) ──
+  // ── Best ball standings + scorecards — above alts ──
   if(state.games&&state.games.bestBall&&state.games.bestBall.enabled){
-    app.appendChild(el('label',{class:'field-label',text:'Best ball scorecards',style:'display:block;margin:16px 2px 8px'}));
-    state.players.forEach(function(p){
-      renderBestBallScorecard(app,p);
-    });
+    // Standings card
+    var bbStandings=state.players.map(function(p){
+      var r=computeBestBallTotal(p);
+      return{player:p,total:r?r.total:null,rounds:r?r.rounds:0};
+    }).filter(function(x){return x.total!==null;})
+      .sort(function(a,b){return a.total-b.total;});
+
+    if(bbStandings.length){
+      app.appendChild(el('label',{class:'field-label',text:'Best ball standings (lowest 4-round total wins)',style:'display:block;margin:16px 2px 8px'}));
+      var bestTotal=bbStandings[0].total;
+      bbStandings.forEach(function(r,i){
+        var isLeading=i===0;
+        var sc=el('div',{class:'lb-card'+(isLeading?' first':'')});
+        var head=el('div',{class:'lb-head'});
+        head.appendChild(el('span',{class:'lb-rank',text:(i+1)+'. '+r.player}));
+        var behind=r.total-bestTotal;
+        var totalLabel=r.total+' strokes'+(r.rounds<4?' ('+r.rounds+' rds)':'')+(behind>0?' (+'+behind+')':'');
+        head.appendChild(el('span',{class:'lb-total',text:totalLabel}));
+        sc.appendChild(head);
+        app.appendChild(sc);
+      });
+    }
+
+    // Scorecards
+    app.appendChild(el('label',{class:'field-label',text:'Best ball scorecards',style:'display:block;margin:14px 2px 8px'}));
+    state.players.forEach(function(p){renderBestBallScorecard(app,p);});
   }
+
+  if(Object.keys(state.alts).length>0) renderAltsCard(app);
 }
 
 function parseTodayScore(normKey){
