@@ -302,6 +302,7 @@ function getAutoPickForPlayer(playerName,allTaken){
 
 function triggerAutoDraft(){
   if(!state||state.locked) return;
+  if(!state.draftStarted) return;
   var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
   var idx=state.picks.length;
   if(idx>=mainOrder.length) return;
@@ -311,7 +312,26 @@ function triggerAutoDraft(){
   if(!pick) return;
   state.picks.push({player:playerName,golfer:pick,autodrafted:true});
   state.clockStartedAt=Date.now();
+  state.clockPaused=false;state.clockPauseRemaining=null;
   saveState();render();
+  checkAndAutoRunNext();
+}
+
+// After any pick, immediately fire for the next player if they have autodraft on
+function checkAndAutoRunNext(){
+  if(!state||!state.draftStarted||state.locked) return;
+  var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
+  var idx=state.picks.length;
+  if(idx>=mainOrder.length) return;
+  var nextPlayer=state.players[mainOrder[idx]];
+  if(state.autodraftPlayers&&state.autodraftPlayers[nextPlayer]){
+    // Short delay so the UI briefly shows who is on the clock before it fires
+    var snapIdx=idx;
+    setTimeout(function(){
+      if(!state||state.picks.length!==snapIdx) return; // another device got there first
+      triggerAutoDraft();
+    },1200);
+  }
 }
 
 function stopClockInterval(){if(clockInterval){clearInterval(clockInterval);clockInterval=null;}}
@@ -422,7 +442,7 @@ var DEFAULT_POINTS_TABLE=[500,300,190,135,110,92,80,70,62,55,48,42,38,34,31,28,2
 function defaultState(){
   return{players:[],golfers:[],picks:[],cuts:{},alts:{},altActive:{},altReplacing:{},locked:false,
     queues:{},queuePasswords:{},playerGames:{},pickClockSeconds:90,clockStartedAt:null,
-    clockPaused:false,clockPauseRemaining:null,
+    clockPaused:false,clockPauseRemaining:null,draftStarted:false,autodraftPlayers:{},
     draftScheduled:null,
     games:{
       lowScore:{enabled:true,wager:25},
@@ -453,6 +473,8 @@ function normalizeState(s){
   if(typeof s.clockStartedAt!=='number'&&s.clockStartedAt!==null) s.clockStartedAt=null;
   if(typeof s.clockPaused!=='boolean') s.clockPaused=false;
   if(typeof s.clockPauseRemaining!=='number'&&s.clockPauseRemaining!==null) s.clockPauseRemaining=null;
+  if(typeof s.draftStarted!=='boolean') s.draftStarted=s.picks&&s.picks.length>0;
+  if(!s.autodraftPlayers||typeof s.autodraftPlayers!=='object'||Array.isArray(s.autodraftPlayers)) s.autodraftPlayers={}; // migrate: if picks exist, draft was started
   if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
   // Games — migrate from old wagerWinner/wagerScore if needed
   if(!s.games||typeof s.games!=='object'||Array.isArray(s.games)){
@@ -1028,10 +1050,18 @@ function renderSetup(app){
   var canStart=state.players.length===state.numPlayers&&state.golfers.length>=state.rosterSize*state.numPlayers;
   var draftDone=state.picks.length>=state.rosterSize*state.numPlayers&&Object.keys(state.alts).length>=state.numPlayers;
   if(isCommissioner){
-    if(canStart&&state.picks.length===0){
-      // Randomize order button
+    // Readiness status
+    if(!canStart){
+      var need=Math.max(0,state.rosterSize*state.numPlayers-state.golfers.length);
+      var msg=state.players.length<state.numPlayers?('Add '+(state.numPlayers-state.players.length)+' more player(s).'):(need>0?('Add '+need+' more golfer(s) \u2014 need '+(state.rosterSize*state.numPlayers)+' total.'):'');
+      if(msg) app.appendChild(el('p',{class:'small-muted',text:msg}));
+    }else if(!state.draftStarted){
+      var readyCard=el('div',{style:'background:rgba(0,89,44,0.07);border:1px solid var(--masters-green);border-radius:6px;padding:0.9rem 1rem;margin-bottom:0.8rem'});
+      readyCard.appendChild(el('p',{style:'margin:0;font-size:14px;color:var(--masters-green-dark)',text:'\u2713 Setup complete \u2014 head to the Draft tab to start when ready.'}));
+      app.appendChild(readyCard);
+      // Randomize order here is fine while draft hasn't started
       if(state.players.length>=2){
-        var randBtn=btn('🔀 Randomize draft order',function(){
+        var randBtn=btn('\uD83D\uDD00 Randomize draft order',function(){
           for(var i=state.players.length-1;i>0;i--){
             var j=Math.floor(Math.random()*(i+1));
             var tmp=state.players[i];state.players[i]=state.players[j];state.players[j]=tmp;
@@ -1041,11 +1071,8 @@ function renderSetup(app){
         randBtn.style.marginBottom='6px';
         app.appendChild(randBtn);
       }
-      app.appendChild(btn('Start snake draft',function(){setLocalView('draft');state.clockStartedAt=Date.now();saveState();render();},'primary full'));
-    }else if(!canStart){
-      var need=Math.max(0,state.rosterSize*state.numPlayers-state.golfers.length);
-      var msg=state.players.length<state.numPlayers?('Add '+(state.numPlayers-state.players.length)+' more player(s).'):(need>0?('Add '+need+' more golfer(s) \u2014 need '+(state.rosterSize*state.numPlayers)+' total.'):'');
-      if(msg) app.appendChild(el('p',{class:'small-muted',text:msg}));
+    }else if(state.draftStarted&&!draftDone){
+      app.appendChild(el('p',{class:'small-muted',text:'Draft is in progress \u2014 go to the Draft tab.'}));
     }
     if(draftDone){
       var lkBtn=btn('Lock teams \uD83D\uDD12 (tournament starting)',function(){if(confirm('Lock all teams? Do this Thursday morning.')){state.locked=true;saveState();render();}},'gold full');
@@ -1114,7 +1141,7 @@ function renderQueue(app){
   }
 
   // Game opt-ins
-  var draftStarted=state.picks.length>0;
+  var draftStarted=state.draftStarted||state.picks.length>0;
   var activeGames=Object.keys(state.games).filter(function(k){return state.games[k].enabled;});
   if(activeGames.length){
     var gcard=el('div',{class:'card'});
@@ -1280,13 +1307,72 @@ function renderQueue(app){
 function renderDraft(app){
   draftScheduleBanner(app);
   if(state.players.length<state.numPlayers||state.golfers.length<state.rosterSize*state.numPlayers){
-    app.appendChild(el('p',{class:'small-muted',text:'Finish setup first.'}));return;
+    app.appendChild(el('p',{class:'small-muted',text:'Finish setup first \u2014 return to the Setup tab.'}));return;
   }
+
+  // ── Pre-draft: show Start button ──
+  if(!state.draftStarted){
+    var preCard=el('div',{class:'card',style:'text-align:center;padding:1.4rem 1rem'});
+    preCard.appendChild(el('p',{style:'font-size:32px;margin:0 0 8px',text:'\uD83C\uDFCC\uFE0F'}));
+    preCard.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:20px;margin:0 0 6px',text:'Ready to draft'}));
+    preCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 14px',text:state.players.join(' \u00b7 ')+' \u00b7 '+state.numPlayers+' rounds of '+state.rosterSize+' picks each'}));
+    if(isCommissioner){
+      // Clock setting reminder
+      preCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 12px;font-size:12px',text:'Pick clock: '+state.pickClockSeconds+'s per pick \u2014 adjust in Setup if needed.'}));
+      var startBtn=btn('Start snake draft \u25b6',function(){
+        if(confirm('Start the draft? The pick clock will begin immediately.')){
+          state.draftStarted=true;
+          state.clockStartedAt=Date.now();
+          state.clockPaused=false;state.clockPauseRemaining=null;
+          saveState();render();
+          checkAndAutoRunNext();
+        }
+      },'primary full');
+      preCard.appendChild(startBtn);
+    }else{
+      preCard.appendChild(el('p',{style:'font-size:14px;color:var(--ink-soft)',text:'Waiting for the commissioner to start the draft\u2026'}));
+    }
+    app.appendChild(preCard);
+    // Still show rosters below so players can review
+    app.appendChild(el('label',{class:'field-label',text:'Draft order',style:'display:block;margin:14px 2px 8px'}));
+    var grid2=el('div',{class:'roster-grid'});
+    state.players.forEach(function(p,i){
+      var rc=el('div',{class:'roster-card'});
+      rc.appendChild(el('p',{class:'pname',text:(i+1)+'. '+p}));
+      rc.appendChild(el('p',{class:'gname',text:'Picks in rounds 1, '+(state.numPlayers*2-i)+', '+(state.numPlayers*2+i+1)+'\u2026'}));
+      grid2.appendChild(rc);
+    });
+    app.appendChild(grid2);
+    return;
+  }
+
   if(state.locked){
     var lb=el('div',{style:'background:var(--masters-green);color:#fff;border-radius:6px;padding:0.8rem 1rem;margin-bottom:1rem;text-align:center'});
     lb.appendChild(el('p',{style:'margin:0;font-family:\'Playfair Display\',serif;font-size:16px',text:'\uD83D\uDD12 Teams are locked \u2014 tournament is underway'}));
     app.appendChild(lb);
   }
+
+  // ── Commissioner controls panel ──
+  if(isCommissioner&&state.draftStarted&&!state.locked){
+    var ctrlCard=el('div',{class:'card',style:'padding:0.75rem 1rem;margin-bottom:0.75rem'});
+    ctrlCard.appendChild(el('label',{class:'field-label',style:'margin-bottom:6px',text:'Commissioner controls'}));
+    var ctrlRow=el('div',{class:'row-flex',style:'gap:6px;flex-wrap:wrap'});
+    if(state.clockPaused){
+      var resumeBtn=btn('\u25b6 Resume clock',function(){resumeClock();},'primary');
+      resumeBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
+      ctrlRow.appendChild(resumeBtn);
+    }else{
+      var pauseBtn=btn('\u23f8 Pause clock',function(){pauseClock();},'');
+      pauseBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
+      ctrlRow.appendChild(pauseBtn);
+    }
+    var resetClockBtn=btn('\u21ba Reset clock',function(){resetClock();},'');
+    resetClockBtn.style.cssText='flex:1;font-size:13px;padding:7px 10px';
+    ctrlRow.appendChild(resetClockBtn);
+    ctrlCard.appendChild(ctrlRow);
+    app.appendChild(ctrlCard);
+  }
+
   var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
   var mainDone=state.picks.length>=mainOrder.length;
   var altsDone=Object.keys(state.alts).length>=state.numPlayers;
@@ -1304,6 +1390,10 @@ function renderDraft(app){
     var pc=el('div',{class:'pick-card'});
     pc.appendChild(el('p',{class:'eyebrow',text:'Round '+round+' \u00b7 Pick '+pickInRound}));
     pc.appendChild(el('p',{class:'onclock',text:state.players[onClockIdx]+' is on the clock'}));
+    var onClockPlayer=state.players[onClockIdx];
+    if(state.autodraftPlayers&&state.autodraftPlayers[onClockPlayer]){
+      pc.appendChild(el('p',{style:'margin:4px 0 0;font-size:13px;color:var(--masters-gold)',text:'\u26a1 Autodraft is on \u2014 picking automatically from queue\u2026'}));
+    }
     // Clock display
     if(state.clockStartedAt&&state.pickClockSeconds){
       var rem0,sec0,col0;
@@ -1323,23 +1413,6 @@ function renderDraft(app){
       clockRow.appendChild(clockNum);
       clockRow.appendChild(barWrap);
       pc.appendChild(clockRow);
-      // Commissioner clock controls
-      if(isCommissioner){
-        var ccRow=el('div',{class:'row-flex',style:'margin-top:6px;gap:6px'});
-        if(state.clockPaused){
-          var resumeBtn=btn('\u25b6 Resume',function(){resumeClock();},'primary');
-          resumeBtn.style.cssText='flex:1;font-size:13px;padding:6px';
-          ccRow.appendChild(resumeBtn);
-        }else{
-          var pauseBtn=btn('\u23f8 Pause',function(){pauseClock();},'');
-          pauseBtn.style.cssText='flex:1;font-size:13px;padding:6px';
-          ccRow.appendChild(pauseBtn);
-        }
-        var resetBtn2=btn('\u21ba Reset clock',function(){resetClock();},'');
-        resetBtn2.style.cssText='flex:1;font-size:13px;padding:6px';
-        ccRow.appendChild(resetBtn2);
-        pc.appendChild(ccRow);
-      }
     }
     app.appendChild(pc);
     var available=state.golfers.filter(function(g){return allTaken.indexOf(g)===-1;});
@@ -1375,6 +1448,7 @@ function renderDraft(app){
               state.clockStartedAt=Date.now();
               state.clockPaused=false;state.clockPauseRemaining=null;
               saveState();render();
+              checkAndAutoRunNext();
             }
           });
           ovrList.appendChild(b);
@@ -1400,16 +1474,15 @@ function renderDraft(app){
         b.addEventListener('touchstart',function(){b.classList.add('tapped');},{passive:true});
         b.addEventListener('touchend',function(){b.classList.remove('tapped');},{passive:true});
         b.addEventListener('click',function(){
-          if(pickInProgress) return; // debounce — ignore rapid taps
+          if(pickInProgress) return;
           if(state.clockPaused&&!isCommissioner) return;
           pickInProgress=true;
-          // Visually disable the list immediately so feedback is instant
           list.classList.add('pick-processing');
           state.picks.push({player:state.players[onClockIdx],golfer:g});
           state.clockStartedAt=Date.now();
           state.clockPaused=false;state.clockPauseRemaining=null;
           saveState();render();
-          // Reset flag after render (render replaces the list anyway)
+          checkAndAutoRunNext();
           setTimeout(function(){pickInProgress=false;},2000);
         });
         list.appendChild(b);
@@ -1469,6 +1542,40 @@ function renderDraft(app){
     grid.appendChild(rc);
   });
   app.appendChild(grid);
+
+  // ── Autodraft toggles ──
+  if(state.draftStarted&&!mainDone){
+    var adCard=el('div',{class:'card',style:'padding:0.75rem 1rem;margin-top:6px'});
+    adCard.appendChild(el('label',{class:'field-label',style:'margin-bottom:6px',text:'Autodraft \u2014 skip the clock, pick from queue instantly'}));
+    adCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 10px',text:'Turn on to have the system pick automatically from your queue each round. Turn off to pick manually with the clock.'}));
+    state.players.forEach(function(p){
+      var isOn=!!(state.autodraftPlayers&&state.autodraftPlayers[p]);
+      var row=el('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)'});
+      var left=el('div');
+      left.appendChild(el('span',{style:'font-size:14.5px',text:p}));
+      if(isOn) left.appendChild(el('span',{class:'autodraft-badge',style:'margin-left:6px',text:'autodraft on'}));
+      row.appendChild(left);
+      // Toggle pill button
+      var togBtn=el('button',{type:'button',class:'game-toggle-btn'+(isOn?' on':''),style:'flex-shrink:0'});
+      togBtn.addEventListener('click',function(){
+        if(!state.autodraftPlayers) state.autodraftPlayers={};
+        state.autodraftPlayers[p]=!isOn;
+        saveState();render();
+        // If we just turned it ON and this player is currently on the clock, fire immediately
+        if(!isOn){
+          var mo=snakeOrder(state.numPlayers,state.rosterSize);
+          var ci=state.picks.length;
+          if(ci<mo.length&&state.players[mo[ci]]===p){
+            checkAndAutoRunNext();
+          }
+        }
+      });
+      row.appendChild(togBtn);
+      row.style.borderBottom='1px solid var(--line)';
+      adCard.appendChild(row);
+    });
+    app.appendChild(adCard);
+  }
   if(!state.locked){
     if(state.picks.length>0&&!mainDone){
       app.appendChild(btn('Undo last pick',function(){state.picks.pop();saveState();render();},'full'));
