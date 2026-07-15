@@ -33,7 +33,7 @@
   html,body{margin:0;padding:0;}
   body{background:var(--cream);color:var(--ink);font-family:'EB Garamond',Georgia,serif;font-size:17px;line-height:1.5;min-height:100vh;padding-bottom:3rem;}
   h1,h2,h3,.serif-head{font-family:'Playfair Display',Georgia,serif;font-weight:600;letter-spacing:0.01em;}
-  header.top{background:linear-gradient(180deg,var(--masters-green) 0%,var(--masters-green-dark) 100%);color:var(--cream);padding:max(1.4rem, calc(env(safe-area-inset-top) + 0.9rem)) 1.2rem 1.6rem;text-align:center;border-bottom:4px solid var(--masters-gold);position:relative;}
+  header.top{background:linear-gradient(180deg,var(--masters-green) 0%,var(--masters-green-dark) 100%);color:var(--cream);padding:max(1.4rem, calc(env(safe-area-inset-top) + 0.9rem)) 1.2rem 2rem;text-align:center;border-bottom:4px solid var(--masters-gold);position:relative;}
   header.top .eyebrow{font-family:'EB Garamond',serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:var(--masters-gold-light);margin:0 0 6px;padding:0 90px;}
   header.top h1{margin:0;font-size:26px;color:#fff;padding:0 90px;}
   header.top .sub{margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.75);padding:0 90px;}
@@ -240,7 +240,8 @@
   <p class="eyebrow" id="header-eyebrow">A tradition unlike any other</p>
   <h1>The Pool</h1>
   <p class="sub" id="header-sub">PGA Tour fantasy snake draft</p>
-  <div id="commish-bar"></div>
+  <div id="commish-bar" style="position:absolute;top:max(12px, calc(env(safe-area-inset-top) + 8px));right:12px;"></div>
+  <div id="player-bar" style="position:absolute;top:max(44px, calc(env(safe-area-inset-top) + 40px));right:12px;"></div>
 </header>
 <div class="wrap">
   <div id="app"></div>
@@ -550,61 +551,73 @@ function shouldRerender(prev,next){
 
 // Renders a compact "You are: [Name]" bar at the top of tabs that need identity.
 // Returns the verified current player name (or '' if not identified/verified).
-function renderPlayerIdentityBar(app){
-  if(isCommissioner) return ''; // commissioner doesn't need to identify
+// Returns verified player name, or '' if not identified/logged in
+function getVerifiedIdentity(){
+  if(isCommissioner) return '';
+  if(!state||!state.players) return '';
   var myName=getMyName();
-  var bar=el('div',{style:'background:var(--cream-2);border-radius:6px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px'});
+  if(!myName||state.players.indexOf(myName)===-1) return '';
+  return isPlayerLoggedIn(myName)?myName:'';
+}
 
-  if(!myName||!state.players.includes(myName)){
-    // Not identified — show selector
-    bar.appendChild(el('span',{class:'small-muted',text:'Who are you? Select your name to make picks and accept bets.'}));
-    var sel=el('select',{style:'font-family:\'EB Garamond\',serif;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:5px;background:var(--cream)'});
-    sel.appendChild(el('option',{value:'',text:'Select\u2026'}));
-    state.players.forEach(function(p){sel.appendChild(el('option',{value:p,text:p}));});
-    sel.addEventListener('change',function(){
-      var chosen=this.value;if(!chosen) return;
+// Header player login button — sits below the commish bar in the header
+function renderPlayerBar(){
+  var bar=document.getElementById('player-bar');
+  if(!bar){return;}
+  bar.innerHTML='';
+  if(!state||!currentPoolId||isCommissioner) return;
+  var identity=getVerifiedIdentity();
+  var myName=getMyName();
+  var needsPw=myName&&state.queuePasswords&&state.queuePasswords[myName]&&!isQueueAuthed(myName);
+
+  if(identity){
+    var b=el('button',{type:'button',class:'commish-btn',style:'background:rgba(255,255,255,0.2);border-color:rgba(255,255,255,0.5)',text:'\uD83D\uDC64 '+identity});
+    b.addEventListener('click',function(){
+      if(confirm('Log out as '+identity+'?')){
+        if(state.queuePasswords&&state.queuePasswords[identity]) clearQueueAuthed(identity);
+        setMyName('');render();
+      }
+    });
+    bar.appendChild(b);
+  }else if(needsPw){
+    // Name selected but password not entered yet — prompt immediately
+    var b2=el('button',{type:'button',class:'commish-btn',style:'border-color:#c9a227;color:#e3c876',text:'\uD83D\uDD12 '+myName});
+    b2.addEventListener('click',function(){
+      var pw=prompt('Enter your password for '+myName+':');
+      if(pw===state.queuePasswords[myName]){setQueueAuthed(myName);render();}
+      else if(pw!==null){alert('Wrong password.');}
+    });
+    bar.appendChild(b2);
+  }else{
+    var b3=el('button',{type:'button',class:'commish-btn',text:'\uD83D\uDC64 Player login'});
+    b3.addEventListener('click',function(){
+      if(!state.players||!state.players.length){alert('No players added yet.');return;}
+      var list=state.players.map(function(p,i){return(i+1)+'. '+p;}).join('\n');
+      var input=prompt('Who are you? Enter your number:\n\n'+list);
+      if(!input) return;
+      var num=parseInt(input,10);
+      if(isNaN(num)||num<1||num>state.players.length){alert('Invalid selection.');return;}
+      var chosen=state.players[num-1];
       setMyName(chosen);
-      // If they have a queue password, need to verify before granting draft rights
-      if(state.queuePasswords&&state.queuePasswords[chosen]&&!isQueueAuthed(chosen)){
-        var pw=prompt('Enter your queue password to log in as '+chosen+':');
+      if(state.queuePasswords&&state.queuePasswords[chosen]){
+        if(isQueueAuthed(chosen)){render();return;}
+        var pw=prompt('Enter your password for '+chosen+':');
         if(pw===state.queuePasswords[chosen]){setQueueAuthed(chosen);render();}
-        else if(pw!==null){alert('Wrong password.');this.value='';setMyName('');}
+        else if(pw!==null){setMyName('');alert('Wrong password.');}
       }else{render();}
     });
-    bar.appendChild(sel);
-    app.appendChild(bar);
-    return '';
+    bar.appendChild(b3);
   }
+}
 
-  // Identified — check password if needed
-  var hasPassword=state.queuePasswords&&state.queuePasswords[myName];
-  var authed=!hasPassword||isQueueAuthed(myName);
-  if(hasPassword&&!authed){
-    bar.appendChild(el('span',{style:'font-size:14px',text:'\uD83D\uDD12 Log in as '+myName+' to draft and accept bets'}));
-    var pwInp=el('input',{type:'password',placeholder:'Your password',style:'flex:1;font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:5px'});
-    bar.appendChild(pwInp);
-    var goBtn=btn('Log in',function(){
-      if(pwInp.value===state.queuePasswords[myName]){setQueueAuthed(myName);render();}
-      else{alert('Wrong password.');}
-    },'primary');
-    goBtn.style.cssText='font-size:13px;padding:6px 12px;flex-shrink:0';
-    pwInp.addEventListener('keydown',function(e){if(e.key==='Enter') goBtn.click();});
-    bar.appendChild(goBtn);
-    app.appendChild(bar);
-    return '';
+// Tabs call this — just returns identity and shows a minimal note if not logged in
+function renderPlayerIdentityBar(app){
+  if(isCommissioner) return '';
+  var identity=getVerifiedIdentity();
+  if(!identity&&app){
+    app.appendChild(el('p',{class:'small-muted',style:'margin-bottom:10px;font-size:12.5px;font-style:italic',text:'Tap \u201cPlayer login\u201d in the top right to participate.'}));
   }
-
-  // Fully logged in
-  bar.appendChild(el('span',{style:'font-size:14px',text:'\uD83D\uDC64 You are: '}));
-  bar.appendChild(el('strong',{style:'font-family:\'Playfair Display\',serif;font-size:15px;color:var(--masters-green-dark)',text:myName}));
-  var changeBtn=btn('Not you?',function(){
-    if(hasPassword) clearQueueAuthed(myName);
-    setMyName('');render();
-  },'');
-  changeBtn.style.cssText='font-size:12px;padding:3px 8px;margin-left:auto';
-  bar.appendChild(changeBtn);
-  app.appendChild(bar);
-  return myName;
+  return identity;
 }
 function queueAuthKey(playerName){return 'qa_'+(currentPoolId||'def')+'_'+playerName;}
 function isQueueAuthed(playerName){return sessionStorage.getItem(queueAuthKey(playerName))==='1';}
@@ -968,6 +981,7 @@ function render(){
   app.innerHTML='';
   renderCommishBar();
   renderBackBar();
+  renderPlayerBar();
   updateHeader();
   if(currentPoolId===null){
     renderPoolSelect(app);
@@ -1439,24 +1453,13 @@ function renderQueue(app){
     app.appendChild(el('p',{class:'small-muted',text:'Add players in Setup first, then return here to set your queue and game opt-ins.'}));
     return;
   }
-  // Name selector (stored locally per device)
-  var myName=getMyName();
-  // Use partial Firebase writes — allows two players to edit their queues simultaneously
+
+  // Use the same player identity system as the header button
+  var myName=getVerifiedIdentity()||getMyName();
   function saveQ(){savePlayerQueue(myName);}
-  var ncard=el('div',{class:'card'});
-  ncard.appendChild(el('label',{class:'field-label',text:'Who are you?'}));
-  var sel=el('select',{style:'width:100%;font-family:\'EB Garamond\',serif;font-size:16px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:var(--cream);color:var(--ink)'});
-  sel.appendChild(el('option',{value:'',text:'Select your name\u2026'}));
-  state.players.forEach(function(p){
-    var o=el('option',{value:p,text:p});
-    if(p===myName) o.selected=true;
-    sel.appendChild(o);
-  });
-  sel.addEventListener('change',function(){setMyName(this.value);render();});
-  ncard.appendChild(sel);
-  app.appendChild(ncard);
-  if(!myName){
-    app.appendChild(el('p',{class:'small-muted',text:'Select your name above to set your queue and game preferences.'}));
+
+  if(!myName||state.players.indexOf(myName)===-1){
+    app.appendChild(el('p',{class:'small-muted',style:'font-style:italic',text:'Tap \u201cPlayer login\u201d in the top right to access your queue and game preferences.'}));
     return;
   }
 
@@ -1465,26 +1468,10 @@ function renderQueue(app){
   var authed=isQueueAuthed(myName);
 
   if(hasPassword&&!authed){
-    // Show password prompt
-    var pwCard=el('div',{class:'card',style:'text-align:center;padding:1.4rem 1.1rem'});
-    pwCard.appendChild(el('p',{style:'font-size:32px;margin:0 0 6px',text:'\uD83D\uDD12'}));
-    pwCard.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:18px;margin:0 0 14px',text:myName+'\u2019s queue is protected'}));
-    var pwInput=el('input',{type:'password',placeholder:'Enter your queue password'});
-    pwCard.appendChild(pwInput);
-    var pwErr=el('p',{style:'color:#b0413e;font-size:13px;margin:6px 0 0;min-height:18px',text:''});
-    pwCard.appendChild(pwErr);
-    var pwBtn=btn('Enter queue',function(){
-      if(pwInput.value===state.queuePasswords[myName]){
-        setQueueAuthed(myName);render();
-      } else {
-        pwErr.textContent='Incorrect password. Try again.';
-        pwInput.value='';pwInput.focus();
-      }
-    },'primary full');
-    pwBtn.style.marginTop='10px';
-    pwCard.appendChild(pwBtn);
-    pwInput.addEventListener('keydown',function(e){if(e.key==='Enter') pwBtn.click();});
-    app.appendChild(pwCard);
+    // Password needed — redirect to header login button
+    app.appendChild(el('p',{style:'font-size:32px;text-align:center;margin:1rem 0 0.5rem',text:'\uD83D\uDD12'}));
+    app.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:18px;text-align:center;margin:0 0 8px',text:myName+'\u2019s queue is protected'}));
+    app.appendChild(el('p',{class:'small-muted',style:'text-align:center;font-style:italic',text:'Tap \u201cPlayer login\u201d in the top right and enter your password to access your queue.'}));
     return;
   }
 
