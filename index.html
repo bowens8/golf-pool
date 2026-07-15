@@ -975,7 +975,7 @@ function renderSetup(app){
       return row;
     }
     scard.appendChild(settingRow('Players in pool',state.numPlayers,2,10,function(v){if(v<state.players.length){alert('Remove players first.');return;}state.numPlayers=v;saveState();render();}));
-    scard.appendChild(settingRow('Golfers per team',state.rosterSize,1,20,function(v){if(v<state.topScores) state.topScores=v;state.rosterSize=v;saveState();render();}));
+    scard.appendChild(settingRow('Golfers per team',state.rosterSize,1,80,function(v){if(v<state.topScores) state.topScores=v;state.rosterSize=v;saveState();render();}));
     scard.appendChild(settingRow('Top scores that count',state.topScores,1,state.rosterSize,function(v){state.topScores=v;saveState();render();}));
     scard.appendChild(settingRow('Pick clock (seconds)',state.pickClockSeconds,15,600,function(v){state.pickClockSeconds=v;saveState();render();}));
     app.appendChild(scard);
