@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>The Pool</title>
+<title>PGA Fantasy</title>
 <!-- PWA / Add to Home Screen -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="The Pool">
+<meta name="apple-mobile-web-app-title" content="PGA Fantasy">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#00592c">
@@ -289,6 +289,73 @@ var liveEventId=null;
 var liveSeason=new Date().getFullYear();
 var liveHoleScores={};
 var bestBallFetchTimer=null;
+var savedBBHistory={}; // {normKey: {roundNum: {strokes,par,scoreTypes}}} — persisted in Firebase
+
+function getHoleDataForRound(normKey,roundNum){
+  // Live data (from ESPN this session) takes priority; fall back to saved history
+  var live=liveHoleScores[normKey]&&liveHoleScores[normKey][roundNum];
+  var saved=savedBBHistory[normKey]&&savedBBHistory[normKey][roundNum];
+  return live||saved||null;
+}
+
+function saveBBHistory(){
+  if(!firebaseReady||!db||!currentPoolId) return;
+  var histRef=db.ref('pools/'+currentPoolId+'/bbHistory');
+  Object.keys(liveHoleScores).forEach(function(key){
+    Object.keys(liveHoleScores[key]).forEach(function(rn){
+      var d=liveHoleScores[key][rn];
+      if(d&&d.strokes&&d.strokes.length){
+        histRef.child(key+'/'+rn).set(d).catch(function(){});
+        // Mirror into savedBBHistory so it's available immediately
+        if(!savedBBHistory[key]) savedBBHistory[key]={};
+        savedBBHistory[key][rn]=d;
+      }
+    });
+  });
+}
+
+function loadBBHistory(poolId){
+  if(!firebaseReady||!db||!poolId) return;
+  db.ref('pools/'+poolId+'/bbHistory').once('value').then(function(snap){
+    var hist=snap.val()||{};
+    Object.keys(hist).forEach(function(key){
+      if(!savedBBHistory[key]) savedBBHistory[key]={};
+      Object.keys(hist[key]).forEach(function(rn){
+        savedBBHistory[key][parseInt(rn)]=hist[key][rn];
+        // Also populate liveHoleScores if not already there
+        if(!liveHoleScores[key]) liveHoleScores[key]={};
+        if(!liveHoleScores[key][parseInt(rn)]) liveHoleScores[key][parseInt(rn)]=hist[key][rn];
+      });
+    });
+    if(state&&localView==='leaderboard') render();
+  }).catch(function(){});
+}
+
+function saveBBLineup(playerName){
+  if(!state||!currentPoolId) return;
+  try{localStorage.setItem(STORAGE_KEY+'_'+currentPoolId,JSON.stringify(state));}catch(e){}
+  if(firebaseReady&&dbRef){
+    var upd={};
+    upd['bestBallLineups/'+playerName]=state.bestBallLineups[playerName]||null;
+    dbRef.update(upd).catch(function(){});
+  }
+}
+
+function getBBLineupForRound(playerName,roundNum){
+  // Returns the selected golfers for this player's best ball lineup for a given round
+  // Falls back to auto-select top N by tournament score
+  var lineup=state.bestBallLineups&&state.bestBallLineups[playerName]&&state.bestBallLineups[playerName][roundNum];
+  if(lineup&&lineup.length) return lineup;
+  // Auto-select
+  var numG=(state.games&&state.games.bestBall&&state.games.bestBall.numGolfers)||5;
+  var picks=state.picks.filter(function(pk){return pk.player===playerName&&!isCut(pk.golfer);}).map(function(pk){return pk.golfer;});
+  return picks.slice().sort(function(a,b){
+    var sa=liveScores[normName(a)],sb=liveScores[normName(b)];
+    if(sa===undefined&&sb===undefined) return 0;
+    if(sa===undefined) return 1;if(sb===undefined) return -1;
+    return sa-sb;
+  }).slice(0,numG);
+}
 var liveTournamentName='';
 var liveStatus='';
 var liveError=null;
@@ -481,6 +548,8 @@ function defaultState(){
     queues:{},queuePasswords:{},playerGames:{},pickClockSeconds:90,clockStartedAt:null,
     clockPaused:false,clockPauseRemaining:null,draftStarted:false,autodraftPlayers:{},
     clockEnabled:true,
+    bestBallLineups:{},
+    resetAt:null,
     draftScheduled:null,
     games:{
       lowScore:{enabled:true,wager:25},
@@ -514,6 +583,8 @@ function normalizeState(s){
   if(typeof s.draftStarted!=='boolean') s.draftStarted=s.picks&&s.picks.length>0;
   if(!s.autodraftPlayers||typeof s.autodraftPlayers!=='object'||Array.isArray(s.autodraftPlayers)) s.autodraftPlayers={};
   if(typeof s.clockEnabled!=='boolean') s.clockEnabled=true;
+  if(!s.bestBallLineups||typeof s.bestBallLineups!=='object'||Array.isArray(s.bestBallLineups)) s.bestBallLineups={};
+  if(typeof s.resetAt!=='number'&&s.resetAt!==null) s.resetAt=null;
   if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
   // Games — migrate from old wagerWinner/wagerScore if needed
   if(!s.games||typeof s.games!=='object'||Array.isArray(s.games)){
@@ -614,16 +685,19 @@ function enterPool(poolId){
       if(suppressNextWrite){suppressNextWrite=false;return;}
       if(remote){
         var normalized=normalizeState(remote);
-        // Safety net: NEVER apply a Firebase state that has fewer picks than
-        // what we currently hold locally — this prevents a stale write from
-        // another device from rolling back recently-made picks.
+        // Safety net: never apply a Firebase state that has fewer picks unless it's
+        // an intentional reset (signalled by a newer resetAt timestamp).
         if(state&&Array.isArray(state.picks)&&normalized.picks.length<state.picks.length){
-          // Our local state is ahead — push it back to Firebase to fix the sync
-          setTimeout(function(){
-            var toWrite=Object.assign({},state);delete toWrite.view;
-            dbRef.set(toWrite).catch(function(){});
-          },200);
-          return;
+          var isIntentionalReset=normalized.resetAt&&(!state.resetAt||normalized.resetAt>state.resetAt);
+          if(!isIntentionalReset){
+            // Our local state is ahead — push it back to Firebase to fix the sync
+            setTimeout(function(){
+              var toWrite=Object.assign({},state);delete toWrite.view;
+              dbRef.set(toWrite).catch(function(){});
+            },200);
+            return;
+          }
+          // Fall through — it's a legitimate reset, accept it
         }
         state=normalized;
         try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
@@ -635,6 +709,7 @@ function enterPool(poolId){
   }
   render();
   fetchLiveScores();
+  loadBBHistory(poolId);
 }
 
 function leavePool(){
@@ -1168,13 +1243,13 @@ function renderSetup(app){
           state.cuts={};state.autodraftPlayers={};
           state.draftStarted=false;state.clockStartedAt=null;
           state.clockPaused=false;state.clockPauseRemaining=null;
-          state.locked=false;
+          state.locked=false;state.resetAt=Date.now();
           saveState();render();
         }
       },'danger full');
       draftRstBtn.style.marginTop='6px';app.appendChild(draftRstBtn);
     }
-      var rstBtn=btn('Reset everything',function(){if(confirm('Clear all players, golfers, picks and alts?')){state=defaultState();saveState();render();}},'danger full');
+      var rstBtn=btn('Reset everything',function(){if(confirm('Clear all players, golfers, picks and alts?')){state=defaultState();state.resetAt=Date.now();saveState();render();}},'danger full');
       rstBtn.style.marginTop='6px';app.appendChild(rstBtn);
     }
   }
@@ -1397,6 +1472,83 @@ function renderQueue(app){
     pwMgCard.appendChild(spBtn);
   }
   app.appendChild(pwMgCard);
+
+  // ── Best Ball daily lineup selection ──
+  if(state.games&&state.games.bestBall&&state.games.bestBall.enabled){
+    var myPG=state.playerGames&&state.playerGames[myName];
+    var optedIn=!myPG||myPG.bestBall!==false;
+    if(optedIn){
+      var numG=state.games.bestBall.numGolfers||5;
+      var myPicks=state.picks.filter(function(pk){return pk.player===myName&&!isCut(pk.golfer);}).map(function(pk){return pk.golfer;});
+      if(myPicks.length){
+        var bbCard=el('div',{class:'card'});
+        bbCard.appendChild(el('label',{class:'field-label',text:'Best ball daily lineup'}));
+        var bbInfo=el('div',{style:'background:var(--cream-2);border-radius:5px;padding:8px 10px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between'});
+        bbInfo.appendChild(el('span',{style:'font-size:13px',text:'Golfers per round (set by commissioner):'}));
+        bbInfo.appendChild(el('span',{style:'font-family:\'Playfair Display\',serif;font-size:18px;font-weight:600;color:var(--masters-green-dark)',text:numG+''}));
+        bbCard.appendChild(bbInfo);
+        bbCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 10px',text:'Choose exactly '+numG+' golfer'+(numG===1?'':'s')+' from your team for each round\'s best ball. If left unset, the system auto-selects your top '+numG+' by score.'}));
+        [1,2,3,4].forEach(function(rn){
+          var myLineup=(state.bestBallLineups&&state.bestBallLineups[myName]&&state.bestBallLineups[myName][rn])||[];
+          var roundSec=el('div',{style:'margin-bottom:14px'});
+          var rHead=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'});
+          rHead.appendChild(el('span',{style:'font-size:13px;font-weight:600;color:var(--masters-green-dark)',text:'Round '+rn}));
+          var badge=myLineup.length===numG?
+            el('span',{style:'font-size:11px;background:rgba(0,89,44,0.15);color:var(--masters-green-dark);padding:2px 8px;border-radius:3px',text:'\u2714 '+myLineup.length+'/'+numG+' set'}):
+            myLineup.length?
+            el('span',{style:'font-size:11px;background:#fff3e0;color:#7a5800;padding:2px 8px;border-radius:3px',text:myLineup.length+'/'+numG+' \u2014 pick '+( numG-myLineup.length)+' more'}):
+            el('span',{class:'small-muted',style:'font-size:11px',text:'Auto-select (0/'+numG+')'});
+          rHead.appendChild(badge);
+          roundSec.appendChild(rHead);
+          // Checkboxes for each golfer
+          var selected=myLineup.slice();
+          myPicks.forEach(function(g){
+            var isChecked=selected.indexOf(g)>-1;
+            var cbRow=el('div',{style:'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)'});
+            var cb=el('input',{type:'checkbox'});
+            cb.checked=isChecked;
+            // Disable if already at max and this one isn't selected
+            if(!isChecked&&selected.length>=numG) cb.disabled=true;
+            cb.addEventListener('change',function(){
+              if(this.checked){
+                if(selected.indexOf(g)===-1&&selected.length<numG) selected.push(g);
+                else{this.checked=false;return;}
+              }else{
+                var idx=selected.indexOf(g);if(idx>-1) selected.splice(idx,1);
+              }
+              // Save immediately
+              if(!state.bestBallLineups) state.bestBallLineups={};
+              if(!state.bestBallLineups[myName]) state.bestBallLineups[myName]={};
+              state.bestBallLineups[myName][rn]=selected.slice();
+              saveBBLineup(myName);
+              // Re-render just the round section to update disabled states
+              render();
+            });
+            cbRow.appendChild(cb);
+            var lbl=el('label',{style:'flex:1;cursor:pointer;font-size:14px'});
+            lbl.textContent=g;
+            var sc=liveScores[normName(g)];
+            if(sc!==undefined) lbl.textContent+='\u2002'+formatScore(sc);
+            lbl.addEventListener('click',function(){cb.click();});
+            cbRow.appendChild(lbl);
+            roundSec.appendChild(cbRow);
+          });
+          // Clear button for this round
+          if(myLineup.length){
+            var clrR=btn('Clear Round '+rn+' lineup',function(){
+              if(!state.bestBallLineups||!state.bestBallLineups[myName]) return;
+              delete state.bestBallLineups[myName][rn];
+              saveBBLineup(myName);render();
+            },'');
+            clrR.style.cssText='font-size:11px;padding:3px 8px;margin-top:6px;color:var(--ink-soft)';
+            roundSec.appendChild(clrR);
+          }
+          bbCard.appendChild(roundSec);
+        });
+        app.appendChild(bbCard);
+      }
+    }
+  }
 }
 
 function renderDraft(app){
@@ -1501,7 +1653,7 @@ function renderDraft(app){
         state.cuts={};state.autodraftPlayers={};
         state.draftStarted=false;state.clockStartedAt=null;
         state.clockPaused=false;state.clockPauseRemaining=null;
-        state.locked=false;
+        state.locked=false;state.resetAt=Date.now();
         saveState();render();
       }
     },'danger full');
@@ -1900,58 +2052,44 @@ function holeStyle(strokes,par){
 function renderBestBallScorecard(app,playerName){
   var g=state.games&&state.games.bestBall;
   if(!g||!g.enabled) return;
-  var picks=state.picks.filter(function(pk){return pk.player===playerName&&!isCut(pk.golfer);}).map(function(pk){return pk.golfer;});
-  var numG=g.numGolfers||picks.length;
-  var ranked=picks.slice().sort(function(a,b){
-    var sa=liveScores[normName(a)],sb=liveScores[normName(b)];
-    if(sa===undefined&&sb===undefined) return 0;
-    if(sa===undefined) return 1;if(sb===undefined) return -1;
-    return sa-sb;
-  });
-  var eligible=ranked.slice(0,numG);
-
-  // Collect rounds that have data
   var roundSet={};
-  eligible.forEach(function(golfer){
-    var hd=liveHoleScores[normName(golfer)]||{};
-    Object.keys(hd).forEach(function(r){roundSet[r]=true;});
+  var allPicks=state.picks.filter(function(pk){return pk.player===playerName&&!isCut(pk.golfer);}).map(function(pk){return pk.golfer;});
+  allPicks.forEach(function(golfer){
+    var key=normName(golfer);
+    Object.keys(liveHoleScores[key]||{}).forEach(function(r){roundSet[r]=true;});
+    Object.keys(savedBBHistory[key]||{}).forEach(function(r){roundSet[r]=true;});
   });
   var roundNums=Object.keys(roundSet).map(Number).sort(function(a,b){return a-b;});
   if(!roundNums.length){
-    var waiting=el('p',{class:'small-muted',style:'margin:4px 0',text:'Hole-by-hole data loading once the tournament is underway\u2026'});
-    app.appendChild(waiting);return;
+    app.appendChild(el('p',{class:'small-muted',style:'margin:4px 0',text:'Hole-by-hole data loading once the tournament is underway\u2026'}));
+    return;
   }
-
   roundNums.forEach(function(rn){
+    var eligible=getBBLineupForRound(playerName,rn);
+    var isCustom=!!(state.bestBallLineups&&state.bestBallLineups[playerName]&&state.bestBallLineups[playerName][rn]&&state.bestBallLineups[playerName][rn].length);
     var card=el('div',{class:'card',style:'padding:0.75rem 0.6rem'});
-    card.appendChild(el('label',{class:'field-label',text:'Round '+rn+' \u2014 '+playerName+' (Best Ball)'}));
-
-    // Gather golfer data for this round
+    var cardHead=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'});
+    cardHead.appendChild(el('label',{class:'field-label',style:'margin:0',text:'Round '+rn+' \u2014 '+playerName+' (Best Ball)'}));
+    cardHead.appendChild(el('span',{class:'small-muted',style:'font-size:11px',text:isCustom?'\uD83D\uDCCB Custom lineup':'Auto lineup'}));
+    card.appendChild(cardHead);
     var golferRows=eligible.map(function(golfer){
-      var key=normName(golfer);
-      var hd=liveHoleScores[key]&&liveHoleScores[key][rn];
+      var hd=getHoleDataForRound(normName(golfer),rn);
       return{name:golfer,strokes:hd?hd.strokes:[],par:hd?hd.par:[]};
     });
-    // Get par from first available golfer
     var parRow=[];
     for(var gi=0;gi<golferRows.length;gi++){if(golferRows[gi].par.length){parRow=golferRows[gi].par;break;}}
     if(!parRow.length) parRow=Array(18).fill(4);
-
-    // Compute best ball per hole
     var maxHoles=Math.max.apply(null,golferRows.map(function(r){return r.strokes.length;})||[0]);
     var bbHoles=[];
     for(var h=0;h<maxHoles;h++){
-      var hs=golferRows.map(function(r){return r.strokes[h];}).filter(function(s){return s!==null&&s!==undefined&&!isNaN(s);});
+      var hs=golferRows.map(function(r){return r.strokes[h];}).filter(function(s){return s!==undefined&&s!==null&&!isNaN(s);});
       bbHoles.push(hs.length?Math.min.apply(null,hs):null);
     }
-
-    // Build front 9 then back 9
     [{label:'Front 9',start:0,end:Math.min(9,maxHoles)},{label:'Back 9',start:9,end:maxHoles}].forEach(function(half){
       if(half.start>=maxHoles) return;
       var wrap=el('div',{class:'sc-wrap'});
       var t=el('table',{class:'sc-table'});
       var thead=el('thead');
-      // Hole number header row
       var hdr=el('tr');
       hdr.appendChild(el('th',{class:'sc-label sc-hole-head',text:half.label}));
       for(var h2=half.start;h2<half.end;h2++) hdr.appendChild(el('th',{class:'sc-hole-head',text:(h2+1)+''}));
@@ -1959,63 +2097,45 @@ function renderBestBallScorecard(app,playerName){
       if(half.end>9) hdr.appendChild(el('th',{class:'sc-hole-head',text:'TOT'}));
       thead.appendChild(hdr);t.appendChild(thead);
       var tbody=el('tbody');
-
-      // Par row
       var pr=el('tr',{class:'sc-par-row'});
       pr.appendChild(el('td',{class:'sc-label',text:'Par'}));
       var halfPar=0;
-      for(var h3=half.start;h3<half.end;h3++){var p=parRow[h3]||4;halfPar+=p;pr.appendChild(el('td',{text:p+''}));}
+      for(var h3=half.start;h3<half.end;h3++){var p2=parRow[h3]||4;halfPar+=p2;pr.appendChild(el('td',{text:p2+''}));}
       pr.appendChild(el('td',{class:'sc-out-in',text:halfPar+''}));
       if(half.end>9){var totPar=parRow.slice(0,18).reduce(function(s,v){return s+(v||4);},0);pr.appendChild(el('td',{text:totPar+''}));}
       tbody.appendChild(pr);
-
-      // Golfer rows
       golferRows.forEach(function(gr){
         var row=el('tr');
-        var lastName=gr.name.split(' ').pop();
-        row.appendChild(el('td',{class:'sc-label',text:lastName}));
+        row.appendChild(el('td',{class:'sc-label',text:gr.name.split(' ').pop()}));
         var halfTotal=0;
         for(var h4=half.start;h4<half.end;h4++){
-          var s=gr.strokes[h4];var p2=parRow[h4]||4;
+          var s=gr.strokes[h4];var p3=parRow[h4]||4;
           if(s!==null&&s!==undefined) halfTotal+=s;
-          var cls=s!==null&&s!==undefined?holeStyle(s,p2):'';
+          var cls=s!==null&&s!==undefined?holeStyle(s,p3):'';
           var td=el('td');
-          if(s!==null&&s!==undefined){
-            var ball=el('span',{class:'sc-ball '+(cls||''),text:s+''});
-            td.appendChild(ball);
-          }else{td.textContent='\u2014';}
+          if(s!==null&&s!==undefined){td.appendChild(el('span',{class:'sc-ball '+(cls||''),text:s+''}));}
+          else{td.textContent='\u2014';}
           row.appendChild(td);
         }
         row.appendChild(el('td',{class:'sc-out-in',text:halfTotal?halfTotal+'':'\u2014'}));
-        if(half.end>9){
-          var frontTotal=gr.strokes.slice(0,9).reduce(function(s,v){return s+(v||0);},0);
-          row.appendChild(el('td',{text:(frontTotal&&halfTotal)?(frontTotal+halfTotal)+'':'\u2014'}));
-        }
+        if(half.end>9){var ft=gr.strokes.slice(0,9).reduce(function(s,v){return s+(v||0);},0);row.appendChild(el('td',{text:(ft&&halfTotal)?(ft+halfTotal)+'':'\u2014'}));}
         tbody.appendChild(row);
       });
-
-      // Team best ball row
       var bbr=el('tr',{class:'sc-bb-row'});
       bbr.appendChild(el('td',{class:'sc-label',text:'BEST BALL'}));
-      var bbHalfTotal=0;
+      var bbHT=0;
       for(var h5=half.start;h5<half.end;h5++){
-        var bbs=bbHoles[h5];var p3=parRow[h5]||4;
-        if(bbs!==null) bbHalfTotal+=bbs;
-        var cls2=bbs!==null?holeStyle(bbs,p3):'';
+        var bbs=bbHoles[h5];var p4=parRow[h5]||4;
+        if(bbs!==null) bbHT+=bbs;
         var td2=el('td');
-        if(bbs!==null){var ball2=el('span',{class:'sc-ball '+(cls2||''),text:bbs+''});td2.appendChild(ball2);}
+        if(bbs!==null){td2.appendChild(el('span',{class:'sc-ball '+(bbs!==null?holeStyle(bbs,p4):''),text:bbs+''}));}
         else{td2.textContent='\u2014';}
         bbr.appendChild(td2);
       }
-      bbr.appendChild(el('td',{class:'sc-out-in',text:bbHalfTotal?bbHalfTotal+'':'\u2014'}));
-      if(half.end>9){
-        var bbFront=bbHoles.slice(0,9).reduce(function(s,v){return s+(v||0);},0);
-        bbr.appendChild(el('td',{text:(bbFront&&bbHalfTotal)?(bbFront+bbHalfTotal)+'':'\u2014'}));
-      }
+      bbr.appendChild(el('td',{class:'sc-out-in',text:bbHT?bbHT+'':'\u2014'}));
+      if(half.end>9){var bbF=bbHoles.slice(0,9).reduce(function(s,v){return s+(v||0);},0);bbr.appendChild(el('td',{text:(bbF&&bbHT)?(bbF+bbHT)+'':'\u2014'}));}
       tbody.appendChild(bbr);
-      t.appendChild(tbody);
-      wrap.appendChild(t);
-      card.appendChild(wrap);
+      t.appendChild(tbody);wrap.appendChild(t);card.appendChild(wrap);
     });
     app.appendChild(card);
   });
@@ -2715,6 +2835,7 @@ function fetchBestBallData(){
     }).catch(function(){});
   });
   Promise.all(promises).then(function(){
+    saveBBHistory(); // persist hole scores to Firebase so they survive reloads
     if(state&&(localView==='leaderboard'||localView==='money')) render();
   });
 }
@@ -2722,22 +2843,13 @@ function fetchBestBallData(){
 function computeBestBallRound(player,roundNum){
   var g=state.games&&state.games.bestBall;
   if(!g||!g.enabled) return null;
-  var picks=state.picks.filter(function(pk){return pk.player===player&&!isCut(pk.golfer);}).map(function(pk){return pk.golfer;});
-  if(!picks.length) return null;
-  // Select top numGolfers by current tournament score
-  var numG=g.numGolfers||picks.length;
-  var ranked=picks.slice().sort(function(a,b){
-    var sa=liveScores[normName(a)];var sb=liveScores[normName(b)];
-    if(sa===undefined&&sb===undefined) return 0;
-    if(sa===undefined) return 1;if(sb===undefined) return -1;
-    return sa-sb;
-  });
-  var eligible=ranked.slice(0,numG);
-  // Find max holes completed this round across eligible golfers
+  // Use player's selected lineup for this round, or auto-select
+  var eligible=getBBLineupForRound(player,roundNum);
+  if(!eligible||!eligible.length) return null;
+  // Find max holes using merged live+saved data
   var maxHoles=0;
   eligible.forEach(function(golfer){
-    var hd=liveHoleScores[normName(golfer)];
-    var roundData=hd&&hd[roundNum];
+    var roundData=getHoleDataForRound(normName(golfer),roundNum);
     var roundHoles=roundData&&roundData.strokes?roundData.strokes:null;
     if(roundHoles) maxHoles=Math.max(maxHoles,roundHoles.filter(function(h){return h!==null;}).length);
   });
@@ -2745,32 +2857,33 @@ function computeBestBallRound(player,roundNum){
   var teamRoundScore=0;
   for(var h=0;h<maxHoles;h++){
     var holeScores=eligible.map(function(golfer){
-      var hd=liveHoleScores[normName(golfer)];
-      var roundData=hd&&hd[roundNum];
+      var roundData=getHoleDataForRound(normName(golfer),roundNum);
       var roundHoles=roundData&&roundData.strokes?roundData.strokes:null;
       return roundHoles&&roundHoles[h]!==undefined&&roundHoles[h]!==null?roundHoles[h]:null;
     }).filter(function(s){return s!==null;});
     if(holeScores.length) teamRoundScore+=Math.min.apply(null,holeScores);
   }
-  return {score:teamRoundScore,holesComplete:maxHoles,eligible:eligible};
+  return{score:teamRoundScore,holesComplete:maxHoles,eligible:eligible};
 }
 
 function computeBestBallTotal(player){
   var g=state.games&&state.games.bestBall;
   if(!g||!g.enabled) return null;
-  // Check which rounds have hole data available
-  var roundNums=new Set();
+  // Collect rounds with data from BOTH live and saved history
+  var roundSet={};
   var picks=state.picks.filter(function(pk){return pk.player===player;}).map(function(pk){return pk.golfer;});
   picks.forEach(function(golfer){
-    var hd=liveHoleScores[normName(golfer)]||{};
-    Object.keys(hd).forEach(function(r){roundNums.add(parseInt(r,10));});
+    var key=normName(golfer);
+    var live=liveHoleScores[key]||{};
+    var saved=savedBBHistory[key]||{};
+    Object.keys(live).forEach(function(r){roundSet[r]=true;});
+    Object.keys(saved).forEach(function(r){roundSet[r]=true;});
   });
-  if(!roundNums.size) return null;
+  if(!Object.keys(roundSet).length) return null;
   var total=0;var roundsFound=0;
-  roundNums.forEach(function(r){
-    var res=computeBestBallRound(player,r);
-    if(res&&res.holesComplete===18){total+=res.score;roundsFound++;}
-    else if(res&&res.holesComplete>0){total+=res.score;roundsFound++;} // partial round counts too
+  Object.keys(roundSet).forEach(function(r){
+    var res=computeBestBallRound(player,parseInt(r,10));
+    if(res&&res.holesComplete>0){total+=res.score;roundsFound++;}
   });
   return roundsFound?{total:total,rounds:roundsFound}:null;
 }
