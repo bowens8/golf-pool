@@ -336,22 +336,31 @@ function triggerAutoDraft(){
   state.clockStartedAt=Date.now();
   state.clockPaused=false;state.clockPauseRemaining=null;
   saveState();render();
-  checkAndAutoRunNext();
+  // Only chain if more players explicitly have autodraft on
+  if(state.autodraftPlayers&&Object.keys(state.autodraftPlayers).some(function(k){return state.autodraftPlayers[k]===true;})){
+    checkAndAutoRunNext();
+  }
 }
 
 // After any pick, immediately fire for the next player if they have autodraft on
 function checkAndAutoRunNext(){
   if(!state||!state.draftStarted||state.locked) return;
+  // Only proceed if at least one player has autodraft explicitly on
+  if(!state.autodraftPlayers||Object.keys(state.autodraftPlayers).length===0) return;
+  var anyOn=Object.keys(state.autodraftPlayers).some(function(k){return state.autodraftPlayers[k]===true;});
+  if(!anyOn) return;
   var mainOrder=snakeOrder(state.numPlayers,state.rosterSize);
   var idx=state.picks.length;
   if(idx>=mainOrder.length) return;
   var nextPlayer=state.players[mainOrder[idx]];
-  if(state.autodraftPlayers&&state.autodraftPlayers[nextPlayer]){
-    // Short delay so the UI briefly shows who is on the clock before it fires
+  if(state.autodraftPlayers[nextPlayer]===true){
+    // Brief delay so the UI shows who is on the clock before the pick fires
     var snapIdx=idx;
     setTimeout(function(){
-      if(!state||state.picks.length!==snapIdx) return; // another device got there first
-      triggerAutoDraft();
+      if(!state||!state.draftStarted||state.picks.length!==snapIdx) return;
+      if(state.autodraftPlayers&&state.autodraftPlayers[nextPlayer]===true){
+        triggerAutoDraft();
+      }
     },1200);
   }
 }
@@ -1366,10 +1375,12 @@ function renderDraft(app){
       var startBtn=btn('Start snake draft \u25b6',function(){
         if(confirm('Start the draft? The pick clock will begin immediately.')){
           state.draftStarted=true;
+          state.autodraftPlayers={}; // always start fresh — no stale autodraft from previous sessions
           state.clockStartedAt=Date.now();
           state.clockPaused=false;state.clockPauseRemaining=null;
           saveState();render();
-          checkAndAutoRunNext();
+          // Note: checkAndAutoRunNext NOT called here — autodraft fires only when
+          // a player explicitly toggles it on during the draft
         }
       },'primary full');
       preCard.appendChild(startBtn);
