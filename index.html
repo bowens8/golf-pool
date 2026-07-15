@@ -68,8 +68,9 @@
   .pick-card{background:var(--cream-2);border:1px solid var(--masters-gold);border-radius:6px;padding:0.9rem 1rem;margin-bottom:0.8rem;}
   .pick-card .eyebrow{font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 4px;}
   .pick-card .onclock{font-family:'Playfair Display',serif;font-size:19px;margin:0;color:var(--masters-green-dark);}
-  .golfer-btn{display:block;width:100%;text-align:left;padding:8px 10px;margin-bottom:5px;border:1px solid var(--line);border-radius:5px;background:#fff;font-family:'EB Garamond',serif;font-size:15px;cursor:pointer;}
-  .golfer-btn:active{background:var(--cream-2);}
+  .golfer-btn{display:block;width:100%;text-align:left;padding:10px 12px;margin-bottom:5px;border:1px solid var(--line);border-radius:5px;background:#fff;font-family:'EB Garamond',serif;font-size:15px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:rgba(0,89,44,0.12);user-select:none;-webkit-user-select:none;transition:background 0.1s,border-color 0.1s;}
+  .golfer-btn:active,.golfer-btn.tapped{background:var(--cream-2);border-color:var(--masters-green);}
+  .pick-processing{opacity:0.45;pointer-events:none;}
   .roster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
   .roster-card{background:var(--cream-2);border-radius:5px;padding:8px 10px;}
   .roster-card .pname{font-family:'Playfair Display',serif;font-size:13px;margin:0 0 4px;color:var(--masters-green-dark);}
@@ -274,6 +275,7 @@ var liveError=null;
 // Pick clock
 var clockInterval=null;
 var clockExpiredForPickCount=-1;
+var pickInProgress=false; // debounce flag — prevents double-tap double-picks
 
 // Country flag map
 var COUNTRY_FLAGS={
@@ -316,9 +318,9 @@ function stopClockInterval(){if(clockInterval){clearInterval(clockInterval);cloc
 
 function startClockInterval(){
   stopClockInterval();
-  if(!state||!state.pickClockSeconds||!state.clockStartedAt) return;
+  if(!state||!state.pickClockSeconds||!state.clockStartedAt||state.clockPaused) return;
   clockInterval=setInterval(function(){
-    if(!state||!state.clockStartedAt||localView!=='draft'){stopClockInterval();return;}
+    if(!state||!state.clockStartedAt||localView!=='draft'||state.clockPaused){stopClockInterval();return;}
     var elapsed=(Date.now()-state.clockStartedAt)/1000;
     var remaining=Math.max(0,state.pickClockSeconds-elapsed);
     var sec=Math.ceil(remaining);
@@ -333,6 +335,33 @@ function startClockInterval(){
       triggerAutoDraft();
     }
   },250);
+}
+
+function pauseClock(){
+  if(!state||state.clockPaused) return;
+  var elapsed=(Date.now()-state.clockStartedAt)/1000;
+  var remaining=Math.max(0,state.pickClockSeconds-elapsed);
+  state.clockPaused=true;
+  state.clockPauseRemaining=remaining;
+  stopClockInterval();
+  saveState();render();
+}
+
+function resumeClock(){
+  if(!state||!state.clockPaused) return;
+  var remaining=typeof state.clockPauseRemaining==='number'?state.clockPauseRemaining:state.pickClockSeconds;
+  state.clockStartedAt=Date.now()-((state.pickClockSeconds-remaining)*1000);
+  state.clockPaused=false;
+  state.clockPauseRemaining=null;
+  saveState();render();
+}
+
+function resetClock(){
+  if(!state) return;
+  state.clockStartedAt=Date.now();
+  state.clockPaused=false;
+  state.clockPauseRemaining=null;
+  saveState();render();
 }
 
 function getMyName(){return localStorage.getItem('pool_my_name_'+(currentPoolId||'def'))||'';}
@@ -393,6 +422,7 @@ var DEFAULT_POINTS_TABLE=[500,300,190,135,110,92,80,70,62,55,48,42,38,34,31,28,2
 function defaultState(){
   return{players:[],golfers:[],picks:[],cuts:{},alts:{},altActive:{},altReplacing:{},locked:false,
     queues:{},queuePasswords:{},playerGames:{},pickClockSeconds:90,clockStartedAt:null,
+    clockPaused:false,clockPauseRemaining:null,
     draftScheduled:null,
     games:{
       lowScore:{enabled:true,wager:25},
@@ -421,6 +451,8 @@ function normalizeState(s){
   if(!s.playerGames||typeof s.playerGames!=='object'||Array.isArray(s.playerGames)) s.playerGames={};
   if(typeof s.pickClockSeconds!=='number'||s.pickClockSeconds<10) s.pickClockSeconds=90;
   if(typeof s.clockStartedAt!=='number'&&s.clockStartedAt!==null) s.clockStartedAt=null;
+  if(typeof s.clockPaused!=='boolean') s.clockPaused=false;
+  if(typeof s.clockPauseRemaining!=='number'&&s.clockPauseRemaining!==null) s.clockPauseRemaining=null;
   if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
   // Games — migrate from old wagerWinner/wagerScore if needed
   if(!s.games||typeof s.games!=='object'||Array.isArray(s.games)){
@@ -461,11 +493,14 @@ function saveState(){
   if(!state||!currentPoolId) return;
   try{localStorage.setItem(STORAGE_KEY+'_'+currentPoolId,JSON.stringify(state));}catch(e){}
   if(firebaseReady&&dbRef){
-    // Strip 'view' before writing to Firebase — tab state is local per device
     var toWrite=Object.assign({},state);
     delete toWrite.view;
     suppressNextWrite=true;
-    dbRef.set(toWrite);
+    dbRef.set(toWrite).catch(function(){
+      // If main write fails, try again without suppress flag
+      suppressNextWrite=false;
+      dbRef.set(toWrite).catch(function(){});
+    });
   }
   if(db&&currentPoolId){
     db.ref('poolsMeta/'+currentPoolId+'/playerCount').set(state.players.length).catch(function(){});
@@ -510,14 +545,26 @@ function enterPool(poolId){
   if(dbRef){dbRef.off();dbRef=null;}
   currentPoolId=poolId;
   state=loadLocalState(poolId);
-  localView=getLocalView(); // restore this device's last tab (local only)
+  localView=getLocalView();
   if(db){
     dbRef=db.ref('pools/'+poolId);
     dbRef.on('value',function(snap){
       var remote=snap.val();
       if(suppressNextWrite){suppressNextWrite=false;return;}
       if(remote){
-        state=normalizeState(remote);
+        var normalized=normalizeState(remote);
+        // Safety net: NEVER apply a Firebase state that has fewer picks than
+        // what we currently hold locally — this prevents a stale write from
+        // another device from rolling back recently-made picks.
+        if(state&&Array.isArray(state.picks)&&normalized.picks.length<state.picks.length){
+          // Our local state is ahead — push it back to Firebase to fix the sync
+          setTimeout(function(){
+            var toWrite=Object.assign({},state);delete toWrite.view;
+            dbRef.set(toWrite).catch(function(){});
+          },200);
+          return;
+        }
+        state=normalized;
         try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
       }else{
         dbRef.set(state);
@@ -629,6 +676,7 @@ function updateHeader(){
 }
 
 function render(){
+  pickInProgress=false; // always reset on render so taps can never get permanently stuck
   var app=document.getElementById('app');
   app.innerHTML='';
   renderCommishBar();
@@ -652,7 +700,7 @@ function render(){
   if(localView==='setup') renderSetup(app);
   else if(localView==='draft'){
     renderDraft(app);
-    if(state.clockStartedAt&&!state.locked) startClockInterval();
+    if(state.clockStartedAt&&!state.locked&&!state.clockPaused) startClockInterval();
     else stopClockInterval();
   }
   else if(localView==='queue') renderQueue(app);
@@ -1258,21 +1306,87 @@ function renderDraft(app){
     pc.appendChild(el('p',{class:'onclock',text:state.players[onClockIdx]+' is on the clock'}));
     // Clock display
     if(state.clockStartedAt&&state.pickClockSeconds){
-      var elapsed0=(Date.now()-state.clockStartedAt)/1000;
-      var rem0=Math.max(0,state.pickClockSeconds-elapsed0);
-      var sec0=Math.ceil(rem0);
-      var col0=sec0<=10?'#b0413e':sec0<=30?'#c9a227':'#00592c';
+      var rem0,sec0,col0;
+      if(state.clockPaused){
+        rem0=typeof state.clockPauseRemaining==='number'?state.clockPauseRemaining:state.pickClockSeconds;
+        sec0=Math.ceil(rem0);col0='#c9a227';
+      }else{
+        var elapsed0=(Date.now()-state.clockStartedAt)/1000;
+        rem0=Math.max(0,state.pickClockSeconds-elapsed0);
+        sec0=Math.ceil(rem0);col0=sec0<=10?'#b0413e':sec0<=30?'#c9a227':'#00592c';
+      }
       var clockRow=el('div',{class:'clock-row'});
-      var clockNum=el('span',{id:'draft-clock-num',class:'clock-num',style:'color:'+col0,text:sec0+'s'});
+      var clockNum=el('span',{id:'draft-clock-num',class:'clock-num',style:'color:'+col0,text:state.clockPaused?'PAUSED':sec0+'s'});
       var barWrap=el('div',{class:'clock-bar-wrap'});
       var bar=el('div',{id:'draft-clock-bar',class:'clock-bar',style:'width:'+((rem0/state.pickClockSeconds)*100)+'%;background:'+col0});
       barWrap.appendChild(bar);
       clockRow.appendChild(clockNum);
       clockRow.appendChild(barWrap);
       pc.appendChild(clockRow);
+      // Commissioner clock controls
+      if(isCommissioner){
+        var ccRow=el('div',{class:'row-flex',style:'margin-top:6px;gap:6px'});
+        if(state.clockPaused){
+          var resumeBtn=btn('\u25b6 Resume',function(){resumeClock();},'primary');
+          resumeBtn.style.cssText='flex:1;font-size:13px;padding:6px';
+          ccRow.appendChild(resumeBtn);
+        }else{
+          var pauseBtn=btn('\u23f8 Pause',function(){pauseClock();},'');
+          pauseBtn.style.cssText='flex:1;font-size:13px;padding:6px';
+          ccRow.appendChild(pauseBtn);
+        }
+        var resetBtn2=btn('\u21ba Reset clock',function(){resetClock();},'');
+        resetBtn2.style.cssText='flex:1;font-size:13px;padding:6px';
+        ccRow.appendChild(resetBtn2);
+        pc.appendChild(ccRow);
+      }
     }
     app.appendChild(pc);
     var available=state.golfers.filter(function(g){return allTaken.indexOf(g)===-1;});
+
+    // Commissioner manual pick override
+    if(isCommissioner){
+      var overrideToggle=el('p',{style:'font-size:12px;color:var(--masters-green);cursor:pointer;margin:0 0 6px;text-align:right',text:'\u270e Commissioner override'});
+      var overrideCard=el('div',{class:'card',style:'display:none;margin-bottom:8px'});
+      overrideToggle.addEventListener('click',function(){overrideCard.style.display=overrideCard.style.display==='none'?'block':'none';});
+      overrideCard.appendChild(el('label',{class:'field-label',text:'Manually assign a pick'}));
+      var ovrNote=el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Assign any available golfer to any player. Use this to fix errors.'});
+      overrideCard.appendChild(ovrNote);
+      // Player select
+      var ovrPRow=el('div',{class:'row-flex',style:'margin-bottom:8px'});
+      ovrPRow.appendChild(el('span',{style:'font-size:13px;min-width:60px',text:'Player:'}));
+      var ovrPSel=el('select',{style:'flex:1;font-family:\'EB Garamond\',serif;font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:5px;background:var(--cream)'});
+      state.players.forEach(function(p){ovrPSel.appendChild(el('option',{value:p,text:p}));});
+      ovrPRow.appendChild(ovrPSel);
+      overrideCard.appendChild(ovrPRow);
+      // Golfer search
+      var ovrSearch=el('input',{type:'text',placeholder:'Search golfer to assign...'});
+      overrideCard.appendChild(ovrSearch);
+      var ovrList=el('div',{class:'scrolly',style:'margin-top:6px;max-height:180px'});
+      function buildOvrList(f){
+        ovrList.innerHTML='';
+        available.filter(function(g){return g.toLowerCase().indexOf(f.toLowerCase())>-1;}).slice(0,30).forEach(function(g){
+          var b=el('button',{type:'button',class:'golfer-btn',style:'font-size:13px;padding:6px 8px'});
+          b.textContent=g;
+          b.addEventListener('click',function(){
+            var targetPlayer=ovrPSel.value;
+            if(confirm('Assign '+g+' to '+targetPlayer+'?')){
+              state.picks.push({player:targetPlayer,golfer:g,manual:true});
+              state.clockStartedAt=Date.now();
+              state.clockPaused=false;state.clockPauseRemaining=null;
+              saveState();render();
+            }
+          });
+          ovrList.appendChild(b);
+        });
+      }
+      buildOvrList('');
+      ovrSearch.addEventListener('input',function(){buildOvrList(this.value);});
+      overrideCard.appendChild(ovrList);
+      app.appendChild(overrideToggle);
+      app.appendChild(overrideCard);
+    }
+
     var card=el('div',{class:'card'});
     var search=el('input',{type:'text',placeholder:'Search golfer'});
     card.appendChild(search);
@@ -1282,9 +1396,28 @@ function renderDraft(app){
       list.innerHTML='';
       available.filter(function(g){return g.toLowerCase().indexOf(f.toLowerCase())>-1;}).forEach(function(g){
         var b=el('button',{type:'button',class:'golfer-btn',text:g});
-        b.addEventListener('click',function(){state.picks.push({player:state.players[onClockIdx],golfer:g});state.clockStartedAt=Date.now();saveState();render();});
+        // Immediate visual feedback on touchstart (before the 300ms click fires)
+        b.addEventListener('touchstart',function(){b.classList.add('tapped');},{passive:true});
+        b.addEventListener('touchend',function(){b.classList.remove('tapped');},{passive:true});
+        b.addEventListener('click',function(){
+          if(pickInProgress) return; // debounce — ignore rapid taps
+          if(state.clockPaused&&!isCommissioner) return;
+          pickInProgress=true;
+          // Visually disable the list immediately so feedback is instant
+          list.classList.add('pick-processing');
+          state.picks.push({player:state.players[onClockIdx],golfer:g});
+          state.clockStartedAt=Date.now();
+          state.clockPaused=false;state.clockPauseRemaining=null;
+          saveState();render();
+          // Reset flag after render (render replaces the list anyway)
+          setTimeout(function(){pickInProgress=false;},2000);
+        });
         list.appendChild(b);
       });
+      if(state.clockPaused&&!isCommissioner){
+        var pausedNote=el('p',{class:'small-muted',style:'text-align:center;padding:12px',text:'\u23f8 Draft is paused by the commissioner.'});
+        list.appendChild(pausedNote);
+      }
     }
     renderMainList('');
     search.addEventListener('input',function(){renderMainList(search.value);});
@@ -1327,6 +1460,7 @@ function renderDraft(app){
       var nameEl=el('p',{class:'gname',style:isWd?'text-decoration:line-through;opacity:0.65':''});
       nameEl.textContent=g+(isWd?' (WD)':'');
       if(pk.autodrafted) nameEl.appendChild(el('span',{class:'autodraft-badge',text:'auto'}));
+      if(pk.manual) nameEl.appendChild(el('span',{class:'autodraft-badge',style:'background:#4a5a4c',text:'manual'}));
       rc.appendChild(nameEl);
     });
     if(state.alts[p]){
