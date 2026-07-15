@@ -365,6 +365,7 @@ var clockInterval=null;
 var clockExpiredForPickCount=-1;
 var pickInProgress=false; // debounce flag — prevents double-tap double-picks
 var presenterMode=false;
+var draftSearchValue=''; // persists draft search across renders so re-renders don't wipe it
 
 // Country flag map
 var COUNTRY_FLAGS={
@@ -549,6 +550,7 @@ function defaultState(){
     clockPaused:false,clockPauseRemaining:null,draftStarted:false,autodraftPlayers:{},
     clockEnabled:true,
     bestBallLineups:{},
+    stateVersion:null,
     resetAt:null,
     draftScheduled:null,
     games:{
@@ -584,6 +586,7 @@ function normalizeState(s){
   if(!s.autodraftPlayers||typeof s.autodraftPlayers!=='object'||Array.isArray(s.autodraftPlayers)) s.autodraftPlayers={};
   if(typeof s.clockEnabled!=='boolean') s.clockEnabled=true;
   if(!s.bestBallLineups||typeof s.bestBallLineups!=='object'||Array.isArray(s.bestBallLineups)) s.bestBallLineups={};
+  if(typeof s.stateVersion!=='number'&&s.stateVersion!==null) s.stateVersion=null;
   if(typeof s.resetAt!=='number'&&s.resetAt!==null) s.resetAt=null;
   if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
   // Games — migrate from old wagerWinner/wagerScore if needed
@@ -622,18 +625,17 @@ function loadLocalState(poolId){
   return defaultState();
 }
 function performReset(newState){
-  // Stamp a fresh resetAt so all devices recognise this as intentional
-  newState.resetAt=Date.now();
+  newState.resetAt=Date.now(); // keep resetAt as extra marker
   state=newState;
-  // Wipe any stale localStorage cache for this pool
   try{localStorage.removeItem(STORAGE_KEY+'_'+(currentPoolId||'def'));}catch(e){}
-  saveState();
+  saveState(); // stamps stateVersion automatically — newer than any device's cached state
   render();
-  // Re-push 3 times with increasing delays to win any race against other devices
+  // Re-push a couple of times in case of network delay on other devices
   if(firebaseReady&&dbRef){
-    [600,1500,3000].forEach(function(ms){
+    var v=state.stateVersion;
+    [800,2000].forEach(function(ms){
       setTimeout(function(){
-        if(state&&state.resetAt===newState.resetAt&&dbRef){
+        if(state&&state.stateVersion===v&&dbRef){
           var tw=Object.assign({},state);delete tw.view;
           dbRef.set(tw).catch(function(){});
         }
@@ -644,6 +646,7 @@ function performReset(newState){
 
 function saveState(){
   if(!state||!currentPoolId) return;
+  state.stateVersion=Date.now(); // timestamp every write so newer state always wins
   try{localStorage.setItem(STORAGE_KEY+'_'+currentPoolId,JSON.stringify(state));}catch(e){}
   if(firebaseReady&&dbRef){
     var toWrite=Object.assign({},state);
@@ -706,22 +709,24 @@ function enterPool(poolId){
       if(suppressNextWrite){suppressNextWrite=false;return;}
       if(remote){
         var normalized=normalizeState(remote);
-        // If this is an intentional reset (newer resetAt), always accept it immediately
-        var isIntentionalReset=normalized.resetAt&&(!state||!state.resetAt||normalized.resetAt>state.resetAt);
-        if(isIntentionalReset){
+        var theirV=normalized.stateVersion||0;
+        var ourV=state?(state.stateVersion||0):0;
+        var prevPickLen=state?state.picks.length:-1;
+        if(theirV>=ourV){
           state=normalized;
           try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
-          render();return;
-        }
-        // Safety net: never apply a Firebase state that has fewer picks than we hold locally
-        // (prevents stale writes from rolling back recently-made picks)
-        if(state&&Array.isArray(state.picks)&&normalized.picks.length<state.picks.length){
+        }else{
           setTimeout(function(){
-            var toWrite=Object.assign({},state);delete toWrite.view;
-            dbRef.set(toWrite).catch(function(){});
-          },200);
+            if(state&&dbRef){var tw=Object.assign({},state);delete tw.view;dbRef.set(tw).catch(function(){});}
+          },300);
           return;
         }
+        // Don't re-render if user is actively typing in a draft search and picks didn't change
+        // (prevents search box glitching when another device syncs a non-pick update)
+        var picksUnchanged=state.picks.length===prevPickLen;
+        var activeEl=document.activeElement;
+        var userTypingInDraft=localView==='draft'&&activeEl&&activeEl.tagName==='INPUT'&&activeEl.type!=='checkbox';
+        if(picksUnchanged&&userTypingInDraft) return;
         state=normalized;
         try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
       }else{
@@ -844,6 +849,7 @@ function updateHeader(){
 
 function render(){
   pickInProgress=false;
+  var savedScroll=window.scrollY; // save scroll before wiping DOM
   var app=document.getElementById('app');
   app.innerHTML='';
   renderCommishBar();
@@ -880,6 +886,8 @@ function render(){
   else if(localView==='bets') renderBets(app);
   else if(localView==='money') renderMoney(app);
   else{stopClockInterval();renderLeaderboard(app);}
+  // Restore scroll so Firebase syncs don't jump the page
+  if(savedScroll>0) window.scrollTo(0,savedScroll);
 }
 
 function renderPoolSelect(app){
@@ -1186,6 +1194,39 @@ function renderSetup(app){
       schCard.appendChild(el('p',{style:'margin:8px 0 0;font-size:13px;color:var(--masters-green)',text:'\uD83D\uDDD3\uFE0F '+formatDraftSchedule(state.draftScheduled)}));
     }
     app.appendChild(schCard);
+
+    // Commissioner queue viewer — see all players' queues at a glance
+    if(state.players.length>0&&state.golfers.length>0){
+      var qvCard=el('div',{class:'card'});
+      qvCard.appendChild(el('label',{class:'field-label',text:'All player queues'}));
+      var allTakenQ=draftedNames().concat(Object.values(state.alts));
+      var anyQueues=state.players.some(function(p){return state.queues&&state.queues[p]&&state.queues[p].length;});
+      if(!anyQueues){
+        qvCard.appendChild(el('p',{class:'small-muted',text:'No players have set a queue yet.'}));
+      }else{
+        var qvGrid=el('div',{class:'roster-grid'});
+        state.players.forEach(function(p){
+          var q=(state.queues&&state.queues[p])||[];
+          var rc=el('div',{class:'roster-card'});
+          var nameRow=el('div',{style:'display:flex;align-items:center;justify-content:space-between;margin-bottom:4px'});
+          nameRow.appendChild(el('p',{class:'pname',style:'margin:0',text:p}));
+          if(state.queuePasswords&&state.queuePasswords[p]) nameRow.appendChild(el('span',{style:'font-size:10px;color:var(--masters-gold)',text:'\uD83D\uDD12'}));
+          rc.appendChild(nameRow);
+          if(!q.length){
+            rc.appendChild(el('p',{class:'gname',style:'font-style:italic',text:'No queue set'}));
+          }else{
+            q.forEach(function(g,i){
+              var taken=allTakenQ.indexOf(g)>-1;
+              var gp=el('p',{class:'gname',style:taken?'text-decoration:line-through;opacity:0.5':'',text:(i+1)+'. '+g+(taken?' \u2713':'')});
+              rc.appendChild(gp);
+            });
+          }
+          qvGrid.appendChild(rc);
+        });
+        qvCard.appendChild(qvGrid);
+      }
+      app.appendChild(qvCard);
+    }
 
     // Queue password management — lets commissioner unlock any player
     var pwdPlayers=state.players.filter(function(p){return state.queuePasswords&&state.queuePasswords[p];});
@@ -1775,6 +1816,8 @@ function renderDraft(app){
 
     var card=el('div',{class:'card'});
     var search=el('input',{type:'text',placeholder:'Search golfer'});
+    // Restore search value from before re-render so typing isn't interrupted
+    if(draftSearchValue) search.value=draftSearchValue;
     card.appendChild(search);
     var list=el('div',{class:'scrolly',style:'margin-top:8px'});
     card.appendChild(list);app.appendChild(card);
@@ -1789,6 +1832,7 @@ function renderDraft(app){
           if(pickInProgress) return;
           if(state.clockPaused&&!isCommissioner) return;
           pickInProgress=true;
+          draftSearchValue=''; // clear search so next player starts fresh
           list.classList.add('pick-processing');
           state.picks.push({player:state.players[onClockIdx],golfer:g});
           state.clockStartedAt=Date.now();
@@ -1804,8 +1848,8 @@ function renderDraft(app){
         list.appendChild(pausedNote);
       }
     }
-    renderMainList('');
-    search.addEventListener('input',function(){renderMainList(search.value);});
+    renderMainList(draftSearchValue); // render with preserved filter
+    search.addEventListener('input',function(){draftSearchValue=this.value;renderMainList(this.value);});
   }else if(mainDone&&!altsDone&&!state.locked){
     var altIdx=altsPickedSoFar;
     var altOnClockIdx=altOrder[altIdx];
