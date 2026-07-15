@@ -1336,10 +1336,19 @@ function renderDraft(app){
     // Still show rosters below so players can review
     app.appendChild(el('label',{class:'field-label',text:'Draft order',style:'display:block;margin:14px 2px 8px'}));
     var grid2=el('div',{class:'roster-grid'});
+    // Compute exact pick numbers for each player from the snake order
+    var fullOrder=snakeOrder(state.numPlayers,state.rosterSize);
+    var playerPickNums={};
+    state.players.forEach(function(p,i){playerPickNums[i]=[];});
+    fullOrder.forEach(function(playerIdx,pos){playerPickNums[playerIdx].push(pos+1);});
+
     state.players.forEach(function(p,i){
       var rc=el('div',{class:'roster-card'});
       rc.appendChild(el('p',{class:'pname',text:(i+1)+'. '+p}));
-      rc.appendChild(el('p',{class:'gname',text:'Picks in rounds 1, '+(state.numPlayers*2-i)+', '+(state.numPlayers*2+i+1)+'\u2026'}));
+      var nums=playerPickNums[i];
+      // Show first few and ellipsis if many
+      var display=nums.slice(0,5).join(', ')+(nums.length>5?'\u2026':'');
+      rc.appendChild(el('p',{class:'gname',text:'Picks: '+display}));
       grid2.appendChild(rc);
     });
     app.appendChild(grid2);
