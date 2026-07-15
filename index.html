@@ -1132,6 +1132,20 @@ function renderSetup(app){
       lkBtn.style.marginTop='6px';app.appendChild(lkBtn);
     }
     if(state.picks.length>0){
+    if(state.picks.length>0||state.draftStarted){
+      var draftRstBtn=btn('Reset draft picks only',function(){
+        if(confirm('This clears all picks, alts, cuts and draft state — but keeps your players, golfer pool, and settings intact. Continue?')){
+          state.picks=[];
+          state.alts={};state.altActive={};state.altReplacing={};
+          state.cuts={};state.autodraftPlayers={};
+          state.draftStarted=false;state.clockStartedAt=null;
+          state.clockPaused=false;state.clockPauseRemaining=null;
+          state.locked=false;
+          saveState();render();
+        }
+      },'danger full');
+      draftRstBtn.style.marginTop='6px';app.appendChild(draftRstBtn);
+    }
       var rstBtn=btn('Reset everything',function(){if(confirm('Clear all players, golfers, picks and alts?')){state=defaultState();saveState();render();}},'danger full');
       rstBtn.style.marginTop='6px';app.appendChild(rstBtn);
     }
@@ -1451,6 +1465,20 @@ function renderDraft(app){
       ctrlRow.appendChild(resetClockBtn);
       ctrlCard.appendChild(ctrlRow);
     }
+    // Reset draft picks
+    var draftRstBtn2=btn('\uD83D\uDDD1 Reset draft picks',function(){
+      if(confirm('Clear all picks, alts and cuts — keep players, golfer pool and settings?')){
+        state.picks=[];
+        state.alts={};state.altActive={};state.altReplacing={};
+        state.cuts={};state.autodraftPlayers={};
+        state.draftStarted=false;state.clockStartedAt=null;
+        state.clockPaused=false;state.clockPauseRemaining=null;
+        state.locked=false;
+        saveState();render();
+      }
+    },'danger full');
+    draftRstBtn2.style.cssText='margin-top:8px;font-size:13px;';
+    ctrlCard.appendChild(draftRstBtn2);
     app.appendChild(ctrlCard);
   }
 
