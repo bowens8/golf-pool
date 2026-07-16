@@ -49,9 +49,11 @@
   .leader-banner .meta{font-size:13px;color:rgba(255,255,255,0.85);margin:4px 0 0;}
   .leader-banner .owners{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;}
   .leader-banner .owner-pill{background:rgba(255,255,255,0.14);border:1px solid var(--masters-gold);color:var(--masters-gold-light);font-size:12px;padding:3px 10px;border-radius:999px;}
-  nav.tabs{display:flex;gap:6px;margin:1rem 0;}
-  nav.tabs button{flex:1;font-family:'EB Garamond',serif;font-size:13px;padding:9px 2px;background:#fff;border:1px solid var(--line);border-radius:5px;color:var(--ink-soft);cursor:pointer;}
-  nav.tabs button.active{background:var(--masters-green);color:#fff;border-color:var(--masters-green-dark);font-weight:600;}
+  nav.tabs-row{display:flex;gap:5px;margin-bottom:5px;}
+  nav.tabs-row:last-child{margin-bottom:1rem;}
+  nav.tabs-row button{flex:1;font-family:'EB Garamond',serif;font-size:13px;padding:9px 2px;background:#fff;border:1px solid var(--line);border-radius:5px;color:var(--ink-soft);cursor:pointer;touch-action:manipulation;}
+  nav.tabs-row button.active{background:var(--masters-green);color:#fff;border-color:var(--masters-green-dark);font-weight:600;}
+  nav.tabs-row.bottom button{font-size:11.5px;padding:8px 1px;}
   label.field-label{display:block;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:6px;}
   input[type=text],input[type=number]{width:100%;font-family:'EB Garamond',serif;font-size:16px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:var(--cream);color:var(--ink);}
   input:focus{outline:2px solid var(--masters-gold);outline-offset:0;}
@@ -754,6 +756,7 @@ function defaultState(){
     clockPaused:false,clockPauseRemaining:null,draftStarted:false,autodraftPlayers:{},
     clockEnabled:true,
     bestBallLineups:{},
+    bbLineupLocks:{},
     stateVersion:null,
     resetAt:null,
     draftScheduled:null,
@@ -790,6 +793,7 @@ function normalizeState(s){
   if(!s.autodraftPlayers||typeof s.autodraftPlayers!=='object'||Array.isArray(s.autodraftPlayers)) s.autodraftPlayers={};
   if(typeof s.clockEnabled!=='boolean') s.clockEnabled=true;
   if(!s.bestBallLineups||typeof s.bestBallLineups!=='object'||Array.isArray(s.bestBallLineups)) s.bestBallLineups={};
+  if(!s.bbLineupLocks||typeof s.bbLineupLocks!=='object'||Array.isArray(s.bbLineupLocks)) s.bbLineupLocks={};
   if(typeof s.stateVersion!=='number'&&s.stateVersion!==null) s.stateVersion=null;
   if(typeof s.resetAt!=='number'&&s.resetAt!==null) s.resetAt=null;
   if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
@@ -1090,6 +1094,7 @@ function render(){
     else stopClockInterval();
   }
   else if(localView==='queue') renderQueue(app);
+  else if(localView==='bestball') renderBestBall(app);
   else if(localView==='bets') renderBets(app);
   else if(localView==='money') renderMoney(app);
   else{stopClockInterval();renderLeaderboard(app);}
@@ -1160,13 +1165,18 @@ function renderPoolSelect(app){
 }
 
 function renderTabs(app){
-  var nav=el('nav',{class:'tabs'});
-  [['setup','Setup'],['queue','Queue'],['draft','Draft'],['leaderboard','Scores'],['bets','Bets'],['money','Money']].forEach(function(t){
-    var b=btn(t[1],function(){setLocalView(t[0]);render();});
-    if(localView===t[0]) b.classList.add('active');
-    nav.appendChild(b);
+  var topTabs=[['setup','Setup'],['queue','Queue'],['draft','Draft']];
+  var botTabs=[['leaderboard','Scores'],['bestball','Best Ball'],['bets','Bets'],['money','Money']];
+  [topTabs,botTabs].forEach(function(row,ri){
+    var nav=el('nav',{class:'tabs-row'+(ri===1?' bottom':'')});
+    if(ri===0) nav.style.marginTop='0.9rem';
+    row.forEach(function(t){
+      var b=btn(t[1],function(){setLocalView(t[0]);render();});
+      if(localView===t[0]) b.classList.add('active');
+      nav.appendChild(b);
+    });
+    app.appendChild(nav);
   });
-  app.appendChild(nav);
 }
 
 function renderSetup(app){
@@ -1734,58 +1744,65 @@ function renderQueue(app){
         bbCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 10px',text:'Choose exactly '+numG+' golfer'+(numG===1?'':'s')+' from your team for each round\'s best ball. If left unset, the system auto-selects your top '+numG+' by score.'}));
         [1,2,3,4].forEach(function(rn){
           var myLineup=(state.bestBallLineups&&state.bestBallLineups[myName]&&state.bestBallLineups[myName][rn])||[];
+          var isLocked=!!(state.bbLineupLocks&&state.bbLineupLocks[rn]);
           var roundSec=el('div',{style:'margin-bottom:14px'});
           var rHead=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px'});
           rHead.appendChild(el('span',{style:'font-size:13px;font-weight:600;color:var(--masters-green-dark)',text:'Round '+rn}));
-          var badge=myLineup.length===numG?
-            el('span',{style:'font-size:11px;background:rgba(0,89,44,0.15);color:var(--masters-green-dark);padding:2px 8px;border-radius:3px',text:'\u2714 '+myLineup.length+'/'+numG+' set'}):
-            myLineup.length?
-            el('span',{style:'font-size:11px;background:#fff3e0;color:#7a5800;padding:2px 8px;border-radius:3px',text:myLineup.length+'/'+numG+' \u2014 pick '+( numG-myLineup.length)+' more'}):
-            el('span',{class:'small-muted',style:'font-size:11px',text:'Auto-select (0/'+numG+')'});
+          var badge;
+          if(isLocked){
+            badge=el('span',{style:'font-size:11px;background:#fce4e4;color:#7a2222;padding:2px 8px;border-radius:3px',text:'\uD83D\uDD12 Locked by commissioner'});
+          }else if(myLineup.length===numG){
+            badge=el('span',{style:'font-size:11px;background:rgba(0,89,44,0.15);color:var(--masters-green-dark);padding:2px 8px;border-radius:3px',text:'\u2714 '+myLineup.length+'/'+numG+' set'});
+          }else if(myLineup.length){
+            badge=el('span',{style:'font-size:11px;background:#fff3e0;color:#7a5800;padding:2px 8px;border-radius:3px',text:myLineup.length+'/'+numG+' \u2014 pick '+(numG-myLineup.length)+' more'});
+          }else{
+            badge=el('span',{class:'small-muted',style:'font-size:11px',text:'Auto-select (0/'+numG+')'});
+          }
           rHead.appendChild(badge);
           roundSec.appendChild(rHead);
-          // Checkboxes for each golfer
-          var selected=myLineup.slice();
-          myPicks.forEach(function(g){
-            var isChecked=selected.indexOf(g)>-1;
-            var cbRow=el('div',{style:'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)'});
-            var cb=el('input',{type:'checkbox'});
-            cb.checked=isChecked;
-            // Disable if already at max and this one isn't selected
-            if(!isChecked&&selected.length>=numG) cb.disabled=true;
-            cb.addEventListener('change',function(){
-              if(this.checked){
-                if(selected.indexOf(g)===-1&&selected.length<numG) selected.push(g);
-                else{this.checked=false;return;}
-              }else{
-                var idx=selected.indexOf(g);if(idx>-1) selected.splice(idx,1);
-              }
-              // Save immediately
-              if(!state.bestBallLineups) state.bestBallLineups={};
-              if(!state.bestBallLineups[myName]) state.bestBallLineups[myName]={};
-              state.bestBallLineups[myName][rn]=selected.slice();
-              saveBBLineup(myName);
-              // Re-render just the round section to update disabled states
-              render();
+
+          if(isLocked){
+            // Show current lineup read-only
+            if(myLineup.length){
+              myLineup.forEach(function(g,i){roundSec.appendChild(el('p',{style:'font-size:13px;color:var(--ink-soft);margin:2px 0',text:(i+1)+'. '+g}));});
+            }else{
+              roundSec.appendChild(el('p',{class:'small-muted',style:'font-style:italic',text:'No lineup set — will auto-select top '+numG+' by score.'}));
+            }
+          }else{
+            // Editable checkboxes
+            var selected=myLineup.slice();
+            myPicks.forEach(function(g){
+              var isChecked=selected.indexOf(g)>-1;
+              var cbRow=el('div',{style:'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line)'});
+              var cb=el('input',{type:'checkbox'});
+              cb.checked=isChecked;
+              if(!isChecked&&selected.length>=numG) cb.disabled=true;
+              cb.addEventListener('change',function(){
+                if(this.checked){if(selected.indexOf(g)===-1&&selected.length<numG) selected.push(g);else{this.checked=false;return;}}
+                else{var idx=selected.indexOf(g);if(idx>-1) selected.splice(idx,1);}
+                if(!state.bestBallLineups) state.bestBallLineups={};
+                if(!state.bestBallLineups[myName]) state.bestBallLineups[myName]={};
+                state.bestBallLineups[myName][rn]=selected.slice();
+                saveBBLineup(myName);render();
+              });
+              cbRow.appendChild(cb);
+              var lbl=el('label',{style:'flex:1;cursor:pointer;font-size:14px'});
+              lbl.textContent=g;
+              var sc=liveScores[normName(g)];
+              if(sc!==undefined) lbl.textContent+='\u2002'+formatScore(sc);
+              lbl.addEventListener('click',function(){cb.click();});
+              cbRow.appendChild(lbl);
+              roundSec.appendChild(cbRow);
             });
-            cbRow.appendChild(cb);
-            var lbl=el('label',{style:'flex:1;cursor:pointer;font-size:14px'});
-            lbl.textContent=g;
-            var sc=liveScores[normName(g)];
-            if(sc!==undefined) lbl.textContent+='\u2002'+formatScore(sc);
-            lbl.addEventListener('click',function(){cb.click();});
-            cbRow.appendChild(lbl);
-            roundSec.appendChild(cbRow);
-          });
-          // Clear button for this round
-          if(myLineup.length){
-            var clrR=btn('Clear Round '+rn+' lineup',function(){
-              if(!state.bestBallLineups||!state.bestBallLineups[myName]) return;
-              delete state.bestBallLineups[myName][rn];
-              saveBBLineup(myName);render();
-            },'');
-            clrR.style.cssText='font-size:11px;padding:3px 8px;margin-top:6px;color:var(--ink-soft)';
-            roundSec.appendChild(clrR);
+            if(myLineup.length){
+              var clrR=btn('Clear Round '+rn+' lineup',function(){
+                if(!state.bestBallLineups||!state.bestBallLineups[myName]) return;
+                delete state.bestBallLineups[myName][rn];
+                saveBBLineup(myName);render();
+              },'');
+              clrR.style.cssText='font-size:11px;padding:3px 8px;margin-top:6px;color:var(--ink-soft)';
+              roundSec.appendChild(clrR);
+            }
           }
           bbCard.appendChild(roundSec);
         });
@@ -2645,38 +2662,75 @@ function renderLeaderboard(app){
   });
   manCard.appendChild(mlist);
   app.appendChild(manCard);
+  if(Object.keys(state.alts).length>0) renderAltsCard(app);
+}
 
-  // ── Best ball standings + scorecards — above alts ──
-  if(state.games&&state.games.bestBall&&state.games.bestBall.enabled){
-    // Standings card
-    var bbStandings=state.players.map(function(p){
-      var r=computeBestBallTotal(p);
-      return{player:p,total:r?r.total:null,rounds:r?r.rounds:0};
-    }).filter(function(x){return x.total!==null;})
-      .sort(function(a,b){return a.total-b.total;});
-
-    if(bbStandings.length){
-      app.appendChild(el('label',{class:'field-label',text:'Best ball standings (lowest 4-round total wins)',style:'display:block;margin:16px 2px 8px'}));
-      var bestTotal=bbStandings[0].total;
-      bbStandings.forEach(function(r,i){
-        var isLeading=i===0;
-        var sc=el('div',{class:'lb-card'+(isLeading?' first':'')});
-        var head=el('div',{class:'lb-head'});
-        head.appendChild(el('span',{class:'lb-rank',text:(i+1)+'. '+r.player}));
-        var behind=r.total-bestTotal;
-        var totalLabel=r.total+' strokes'+(r.rounds<4?' ('+r.rounds+' rds)':'')+(behind>0?' (+'+behind+')':'');
-        head.appendChild(el('span',{class:'lb-total',text:totalLabel}));
-        sc.appendChild(head);
-        app.appendChild(sc);
-      });
-    }
-
-    // Scorecards
-    app.appendChild(el('label',{class:'field-label',text:'Best ball scorecards',style:'display:block;margin:14px 2px 8px'}));
-    state.players.forEach(function(p){renderBestBallScorecard(app,p);});
+function renderBestBall(app){
+  if(!state.games||!state.games.bestBall||!state.games.bestBall.enabled){
+    app.appendChild(el('p',{class:'small-muted',text:'Best ball game is not enabled. Turn it on in the Setup tab under Games.'}));
+    return;
+  }
+  var drafted=draftedNames();
+  if(!drafted.length){
+    app.appendChild(el('p',{class:'small-muted',text:'Draft golfers first to see best ball scores.'}));
+    return;
   }
 
-  if(Object.keys(state.alts).length>0) renderAltsCard(app);
+  // Only opted-in players participate
+  var optedIn=getGameParticipants('bestBall');
+
+  // Commissioner round lineup lock controls
+  if(isCommissioner){
+    var lockCard=el('div',{class:'card',style:'padding:0.75rem 1rem;margin-bottom:0.9rem'});
+    lockCard.appendChild(el('label',{class:'field-label',text:'Lock best ball lineups'}));
+    lockCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Lock each round before play starts so lineups can\'t be changed.'}));
+    [1,2,3,4].forEach(function(rn){
+      var isLocked=!!(state.bbLineupLocks&&state.bbLineupLocks[rn]);
+      var row=el('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)'});
+      row.appendChild(el('span',{style:'font-size:14px',text:'Round '+rn+' lineup'}));
+      var right=el('div',{style:'display:flex;align-items:center;gap:8px'});
+      right.appendChild(el('span',{class:'small-muted',text:isLocked?'\uD83D\uDD12 Locked':'Open'}));
+      var tog=el('button',{type:'button',class:'game-toggle-btn'+(isLocked?' on':'')});
+      tog.addEventListener('click',function(){
+        if(!state.bbLineupLocks) state.bbLineupLocks={};
+        state.bbLineupLocks[rn]=!isLocked;
+        saveState();render();
+      });
+      right.appendChild(tog);
+      row.appendChild(right);
+      lockCard.appendChild(row);
+    });
+    app.appendChild(lockCard);
+  }
+
+  // Best ball standings — opted-in players only
+  var bbStandings=optedIn.map(function(p){
+    var r=computeBestBallTotal(p);
+    return{player:p,total:r?r.total:null,rounds:r?r.rounds:0};
+  }).filter(function(x){return x.total!==null;})
+    .sort(function(a,b){return a.total-b.total;});
+
+  if(bbStandings.length){
+    app.appendChild(el('label',{class:'field-label',text:'Best ball standings (lowest 4-round total wins)',style:'display:block;margin:0 0 8px'}));
+    var bestTotal=bbStandings[0].total;
+    bbStandings.forEach(function(r,i){
+      var sc=el('div',{class:'lb-card'+(i===0?' first':'')});
+      var head=el('div',{class:'lb-head'});
+      head.appendChild(el('span',{class:'lb-rank',text:(i+1)+'. '+r.player}));
+      var behind=r.total-bestTotal;
+      head.appendChild(el('span',{class:'lb-total',text:r.total+' strokes'+(r.rounds<4?' ('+r.rounds+' rds)':'')+(behind>0?' (+'+behind+')':'')}));
+      sc.appendChild(head);
+      app.appendChild(sc);
+    });
+  } else {
+    app.appendChild(el('p',{class:'small-muted',text:'No best ball scores yet — scorecards will populate once the round is underway.'}));
+  }
+
+  // Per-player scorecards — only for opted-in players
+  if(optedIn.length){
+    app.appendChild(el('label',{class:'field-label',text:'Best ball scorecards',style:'display:block;margin:14px 2px 8px'}));
+    optedIn.forEach(function(p){renderBestBallScorecard(app,p);});
+  }
 }
 
 function parseTodayScore(normKey){
@@ -3022,7 +3076,8 @@ function renderMoney(app){
   // Best ball
   var bbResults=[];
   if(g.bestBall&&g.bestBall.enabled){
-    bbResults=state.players.map(function(p){var r=computeBestBallTotal(p);return{player:p,result:r,total:r?r.total:null};}).filter(function(x){return x.total!==null;});
+    var bbOptedIn=getGameParticipants('bestBall');
+    bbResults=bbOptedIn.map(function(p){var r=computeBestBallTotal(p);return{player:p,result:r,total:r?r.total:null};}).filter(function(x){return x.total!==null;});
     bbResults.sort(function(a,b){return a.total-b.total;});
   }
   var bbWinners=bbResults.length?bbResults.filter(function(r){return r.total===bbResults[0].total;}).map(function(r){return r.player;}):[]; 
@@ -3085,19 +3140,26 @@ function renderMoney(app){
       if(!g[gameKey]||!g[gameKey].enabled) return;
       var parts=getGameParticipants(gameKey);
       if(parts.indexOf(p)===-1){
-        lines.push({label:label+' (not opted in)',val:'\u2014',col:'var(--ink-soft)'});
+        // Not opted in — refund their stake for this game
+        net+=g[gameKey].wager;
+        lines.push({label:label+' (not opted in \u2014 stake returned)',val:'+$'+g[gameKey].wager,col:'var(--ink-soft)'});
         return;
       }
       var pot=g[gameKey].wager*parts.length;
       if(!winners.length){
-        lines.push({label:label+' (no winner yet)',val:'\u2014',col:'var(--ink-soft)'});
-      }else if(winners.indexOf(p)>-1){
-        var eligible=winners.filter(function(w){return parts.indexOf(w)>-1;});
-        var share=eligible.length?pot/eligible.length:0;
-        net+=share;
-        lines.push({label:label+(eligible.length>1?' (split)':''),val:'+$'+share.toFixed(0),col:'#1a5c2e'});
+        // No winner yet — stake held, net neutral (refund temporarily)
+        net+=g[gameKey].wager;
+        lines.push({label:label+' (in progress \u2014 stake held)',val:'\u00b10',col:'var(--ink-soft)'});
       }else{
-        lines.push({label:label,val:'-$'+g[gameKey].wager,col:'#b0413e'});
+        // Only opted-in players can win
+        var eligible=winners.filter(function(w){return parts.indexOf(w)>-1;});
+        if(eligible.indexOf(p)>-1){
+          var share=eligible.length?pot/eligible.length:0;
+          net+=share;
+          lines.push({label:label+(eligible.length>1?' (split)':''),val:'+$'+share.toFixed(0),col:'#1a5c2e'});
+        }else{
+          lines.push({label:label,val:'-$'+g[gameKey].wager,col:'#b0413e'});
+        }
       }
     }
     addGame(lsWinners,'lowScore','Low Team Score');
