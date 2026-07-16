@@ -2109,8 +2109,8 @@ function renderDraft(app){
       'Clock is off. Players with autodraft on will pick automatically from their queue each turn.'}));
     state.players.forEach(function(p){
       var isOn=!!(state.autodraftPlayers&&state.autodraftPlayers[p]);
-      // Show toggle for: commissioner (all players), or any player for themselves
-      var canToggle=isCommissioner; // commissioner always can; players toggle in Queue tab
+      // Commissioner can toggle anyone; players can toggle only themselves
+      var canToggle=isCommissioner||(draftIdentity&&draftIdentity===p);
       var row=el('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)'});
       var left=el('div',{style:'display:flex;align-items:center;gap:8px'});
       left.appendChild(el('span',{style:'font-size:14.5px',text:p}));
