@@ -2428,6 +2428,43 @@ function renderLeaderboard(app){
   var drafted=draftedNames();
   if(!drafted.length){app.appendChild(el('p',{class:'small-muted',text:'Draft golfers first.'}));return;}
 
+  // Commissioner debug card — shows raw ESPN data so you don't need dev tools
+  if(isCommissioner){
+    var dbgCard=el('div',{class:'card',style:'font-size:12px;margin-bottom:10px;background:#fffef0;border-color:#c9a227'});
+    dbgCard.appendChild(el('label',{class:'field-label',text:'ESPN Data Debug (commissioner only)'}));
+    var rows=[
+      'Event ID: '+(liveEventId||'❌ not captured — ESPN may not have an active event'),
+      'Golfers with score: '+Object.keys(liveScores).length,
+      'Athlete IDs captured: '+Object.keys(liveAthleteIds).length,
+      'Hole data loaded: '+Object.keys(liveHoleScores).length+' golfers',
+    ];
+    // Show statusDetail for first 3 golfers
+    var sampleKeys=Object.keys(liveDetails).slice(0,3);
+    sampleKeys.forEach(function(k){
+      var d=liveDetails[k];
+      rows.push('\u2022 '+liveDisplayNames[k]+': status="'+d.statusDesc+'" detail="'+d.statusDetail+'" today="'+d.todayRaw+'"');
+    });
+    // Show hole data for first drafted golfer
+    var draftedKey=normName(drafted[0]);
+    var hd=liveHoleScores[draftedKey];
+    if(hd&&Object.keys(hd).length){
+      rows.push('Hole data for '+drafted[0]+': rounds '+Object.keys(hd).join(', '));
+    } else {
+      rows.push('Hole data for '+drafted[0]+': ❌ none — best ball scorecards will show loading');
+    }
+    rows.forEach(function(r){
+      dbgCard.appendChild(el('p',{style:'margin:2px 0;color:#4a4a00',text:r}));
+    });
+    // Manual trigger button
+    var triggerBtn=btn('Force-fetch best ball data now',function(){
+      if(liveEventId){fetchBestBallData();}
+      else{alert('No event ID — ESPN doesn\'t have an active tournament. Best ball data is only available during a live PGA Tour event (Thursday–Sunday).');}
+    },'');
+    triggerBtn.style.cssText='font-size:11px;padding:4px 10px;margin-top:6px;';
+    dbgCard.appendChild(triggerBtn);
+    app.appendChild(dbgCard);
+  }
+
   var liveBar=el('div',{class:'row-flex',style:'margin-bottom:10px;justify-content:space-between'});
   var ltag=el('span',{class:'live-tag'});
   ltag.appendChild(el('span',{class:'live-dot'}));
