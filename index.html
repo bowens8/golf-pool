@@ -92,6 +92,13 @@
   .p-pick-item.fresh{color:var(--masters-gold-light);font-weight:600;}
   .p-exit-btn{position:fixed;bottom:16px;right:16px;background:rgba(0,0,0,0.45);color:rgba(255,255,255,0.65);border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:8px 18px;font-family:'EB Garamond',serif;font-size:14px;cursor:pointer;z-index:10001;touch-action:manipulation;}
   .tv-btn{margin-left:4px;}
+  /* Player login modal */
+  .login-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .login-card{background:var(--cream);border-radius:10px;padding:1.4rem;width:100%;max-width:380px;max-height:85vh;overflow-y:auto;}
+  .login-card h3{font-family:'Playfair Display',serif;font-size:20px;margin:0;color:var(--masters-green-dark);}
+  .login-player-btn{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;padding:12px 14px;margin-bottom:8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:'EB Garamond',serif;font-size:18px;cursor:pointer;touch-action:manipulation;}
+  .login-player-btn:active{background:var(--cream-2);}
+  .login-back{display:block;width:100%;text-align:center;margin-top:12px;background:none;border:none;font-family:'EB Garamond',serif;font-size:14px;color:var(--ink-soft);cursor:pointer;padding:4px;}
   .roster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
   .roster-card{background:var(--cream-2);border-radius:5px;padding:8px 10px;}
   .roster-card .pname{font-family:'Playfair Display',serif;font-size:13px;margin:0 0 4px;color:var(--masters-green-dark);}
@@ -366,7 +373,112 @@ var clockInterval=null;
 var clockExpiredForPickCount=-1;
 var pickInProgress=false; // debounce flag — prevents double-tap double-picks
 var presenterMode=false;
-var draftSearchValue=''; // persists draft search across renders so re-renders don't wipe it
+var draftSearchValue='';
+var loginModalOpen=false;
+
+function closeLoginModal(){
+  loginModalOpen=false;
+  var m=document.getElementById('login-modal');
+  if(m) m.remove();
+}
+
+function showPasswordStep(playerName,card){
+  // Clear card below the header row
+  while(card.children.length>1) card.removeChild(card.lastChild);
+  var hasPassword=!!(state.queuePasswords&&state.queuePasswords[playerName]);
+
+  card.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:22px;text-align:center;color:var(--masters-green-dark);margin:10px 0 16px',text:playerName}));
+
+  if(hasPassword){
+    // Enter existing password
+    card.appendChild(el('label',{class:'field-label',text:'Your password'}));
+    var pwInp=el('input',{type:'password',placeholder:'Enter your password'});
+    card.appendChild(pwInp);
+    var pwErr=el('p',{style:'color:#b0413e;font-size:12.5px;margin:4px 0;min-height:16px',text:''});
+    card.appendChild(pwErr);
+    var loginBtn=btn('Log in',function(){
+      if(pwInp.value===state.queuePasswords[playerName]){
+        setQueueAuthed(playerName);closeLoginModal();render();
+      }else{pwErr.textContent='Wrong password — try again.';pwInp.value='';pwInp.focus();}
+    },'primary full');
+    loginBtn.style.marginTop='8px';
+    card.appendChild(loginBtn);
+    pwInp.addEventListener('keydown',function(e){if(e.key==='Enter') loginBtn.click();});
+    setTimeout(function(){pwInp.focus();},100);
+    card.appendChild(el('p',{class:'small-muted',style:'margin-top:14px;font-size:12px;text-align:center',text:'Forgotten your password? Ask the commissioner to reset it in the Setup tab.'}));
+  }else{
+    // No password — option to set one or skip
+    card.appendChild(el('p',{class:'small-muted',style:'margin:0 0 12px',text:'You haven\'t set a password yet. Set one now to protect your queue, or continue without one.'}));
+    card.appendChild(el('label',{class:'field-label',text:'Set a password (optional)'}));
+    var np1=el('input',{type:'password',placeholder:'New password'});
+    var np2=el('input',{type:'password',placeholder:'Confirm password',style:'margin-top:6px'});
+    var npErr=el('p',{style:'color:#b0413e;font-size:12.5px;margin:4px 0;min-height:16px',text:''});
+    card.appendChild(np1);card.appendChild(np2);card.appendChild(npErr);
+    var setBtn=btn('Set password & log in',function(){
+      var v=np1.value.trim();
+      if(!v){npErr.textContent='Enter a password.';return;}
+      if(v!==np2.value){npErr.textContent='Passwords don\'t match.';return;}
+      if(!state.queuePasswords) state.queuePasswords={};
+      state.queuePasswords[playerName]=v;
+      savePlayerQueue(playerName);
+      setQueueAuthed(playerName);
+      closeLoginModal();render();
+    },'primary full');
+    setBtn.style.marginTop='8px';
+    card.appendChild(setBtn);
+    var divider=el('p',{style:'text-align:center;color:var(--ink-soft);font-size:13px;margin:12px 0',text:'— or —'});
+    card.appendChild(divider);
+    var skipBtn=btn('Continue without a password',function(){closeLoginModal();render();},'full');
+    card.appendChild(skipBtn);
+  }
+
+  var backBtn=el('button',{type:'button',class:'login-back',text:'\u2190 Choose a different player'});
+  backBtn.addEventListener('click',function(){setMyName('');openLoginModal();});
+  card.appendChild(backBtn);
+}
+
+function openLoginModal(){
+  closeLoginModal();
+  loginModalOpen=true;
+  var overlay=el('div',{id:'login-modal',class:'login-overlay'});
+  var card=el('div',{class:'login-card'});
+
+  // Header row
+  var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:14px'});
+  head.appendChild(el('h3',{text:'Player Login'}));
+  var xBtn=el('button',{type:'button',style:'background:none;border:none;font-size:22px;cursor:pointer;color:var(--ink-soft);line-height:1',text:'\u00d7'});
+  xBtn.addEventListener('click',closeLoginModal);
+  head.appendChild(xBtn);
+  card.appendChild(head);
+
+  var identity=getVerifiedIdentity();
+  if(identity){
+    // Already logged in
+    card.appendChild(el('p',{style:'text-align:center;font-size:32px;margin:8px 0',text:'\uD83D\uDC64'}));
+    card.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:22px;text-align:center;color:var(--masters-green-dark);margin:0 0 4px',text:identity}));
+    card.appendChild(el('p',{class:'small-muted',style:'text-align:center;margin:0 0 16px',text:'You\'re logged in'}));
+    var logoutBtn=btn('Log out',function(){
+      if(state.queuePasswords&&state.queuePasswords[identity]) clearQueueAuthed(identity);
+      setMyName('');closeLoginModal();render();
+    },'danger full');
+    card.appendChild(logoutBtn);
+  }else{
+    // Player name list
+    card.appendChild(el('p',{class:'small-muted',style:'margin:0 0 12px',text:'Select your name:'}));
+    state.players.forEach(function(p){
+      var hasPassword=!!(state.queuePasswords&&state.queuePasswords[p]);
+      var pb=el('button',{type:'button',class:'login-player-btn'});
+      pb.appendChild(document.createTextNode(p));
+      if(hasPassword) pb.appendChild(el('span',{style:'font-size:14px;color:var(--masters-gold)',text:' \uD83D\uDD12'}));
+      pb.addEventListener('click',function(){setMyName(p);showPasswordStep(p,card);});
+      card.appendChild(pb);
+    });
+  }
+
+  overlay.appendChild(card);
+  overlay.addEventListener('click',function(e){if(e.target===overlay) closeLoginModal();});
+  document.body.appendChild(overlay);
+} // persists draft search across renders so re-renders don't wipe it
 
 // Country flag map
 var COUNTRY_FLAGS={
@@ -563,51 +675,17 @@ function getVerifiedIdentity(){
 // Header player login button — sits below the commish bar in the header
 function renderPlayerBar(){
   var bar=document.getElementById('player-bar');
-  if(!bar){return;}
+  if(!bar) return;
   bar.innerHTML='';
   if(!state||!currentPoolId||isCommissioner) return;
   var identity=getVerifiedIdentity();
   var myName=getMyName();
   var needsPw=myName&&state.queuePasswords&&state.queuePasswords[myName]&&!isQueueAuthed(myName);
-
-  if(identity){
-    var b=el('button',{type:'button',class:'commish-btn',style:'background:rgba(255,255,255,0.2);border-color:rgba(255,255,255,0.5)',text:'\uD83D\uDC64 '+identity});
-    b.addEventListener('click',function(){
-      if(confirm('Log out as '+identity+'?')){
-        if(state.queuePasswords&&state.queuePasswords[identity]) clearQueueAuthed(identity);
-        setMyName('');render();
-      }
-    });
-    bar.appendChild(b);
-  }else if(needsPw){
-    // Name selected but password not entered yet — prompt immediately
-    var b2=el('button',{type:'button',class:'commish-btn',style:'border-color:#c9a227;color:#e3c876',text:'\uD83D\uDD12 '+myName});
-    b2.addEventListener('click',function(){
-      var pw=prompt('Enter your password for '+myName+':');
-      if(pw===state.queuePasswords[myName]){setQueueAuthed(myName);render();}
-      else if(pw!==null){alert('Wrong password.');}
-    });
-    bar.appendChild(b2);
-  }else{
-    var b3=el('button',{type:'button',class:'commish-btn',text:'\uD83D\uDC64 Player login'});
-    b3.addEventListener('click',function(){
-      if(!state.players||!state.players.length){alert('No players added yet.');return;}
-      var list=state.players.map(function(p,i){return(i+1)+'. '+p;}).join('\n');
-      var input=prompt('Who are you? Enter your number:\n\n'+list);
-      if(!input) return;
-      var num=parseInt(input,10);
-      if(isNaN(num)||num<1||num>state.players.length){alert('Invalid selection.');return;}
-      var chosen=state.players[num-1];
-      setMyName(chosen);
-      if(state.queuePasswords&&state.queuePasswords[chosen]){
-        if(isQueueAuthed(chosen)){render();return;}
-        var pw=prompt('Enter your password for '+chosen+':');
-        if(pw===state.queuePasswords[chosen]){setQueueAuthed(chosen);render();}
-        else if(pw!==null){setMyName('');alert('Wrong password.');}
-      }else{render();}
-    });
-    bar.appendChild(b3);
-  }
+  var btnText=identity?('\uD83D\uDC64 '+identity):needsPw?('\uD83D\uDD12 '+myName):'\uD83D\uDC64 Player login';
+  var btnStyle=identity?'background:rgba(255,255,255,0.2);border-color:rgba(255,255,255,0.5)':needsPw?'border-color:#c9a227;color:#e3c876':'';
+  var lb=el('button',{type:'button',class:'commish-btn',style:btnStyle,text:btnText});
+  lb.addEventListener('click',openLoginModal);
+  bar.appendChild(lb);
 }
 
 // Tabs call this — just returns identity and shows a minimal note if not logged in
@@ -976,6 +1054,7 @@ function updateHeader(){
 
 function render(){
   pickInProgress=false;
+  closeLoginModal(); // always close login modal on re-render
   var savedScroll=window.scrollY; // save scroll before wiping DOM
   var app=document.getElementById('app');
   app.innerHTML='';
@@ -1359,11 +1438,11 @@ function renderSetup(app){
     // Queue password management — lets commissioner unlock any player
     var pwdPlayers=state.players.filter(function(p){return state.queuePasswords&&state.queuePasswords[p];});
     var qmCard=el('div',{class:'card'});
-    qmCard.appendChild(el('label',{class:'field-label',text:'Queue password management'}));
+    qmCard.appendChild(el('label',{class:'field-label',text:'Reset player passwords'}));
     if(!pwdPlayers.length){
       qmCard.appendChild(el('p',{class:'small-muted',text:'No players have set a queue password yet.'}));
     }else{
-      qmCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Remove a player\'s password if they get locked out. They can set a new one in the Queue tab.'}));
+      qmCard.appendChild(el('p',{class:'small-muted',style:'margin:0 0 8px',text:'Remove a player\'s password if they\'re locked out or need a reset. They can set a new one via Player login.'}));
       pwdPlayers.forEach(function(p){
         var row=el('div',{class:'list-row'});
         var left=el('div');
