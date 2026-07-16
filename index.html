@@ -2458,10 +2458,46 @@ function renderLeaderboard(app){
     // Manual trigger button
     var triggerBtn=btn('Force-fetch best ball data now',function(){
       if(liveEventId){fetchBestBallData();}
-      else{alert('No event ID — ESPN doesn\'t have an active tournament. Best ball data is only available during a live PGA Tour event (Thursday–Sunday).');}
+      else{alert('No event ID.');}
     },'');
     triggerBtn.style.cssText='font-size:11px;padding:4px 10px;margin-top:6px;';
     dbgCard.appendChild(triggerBtn);
+
+    // Raw data inspector — shows the actual ESPN response structure
+    var rawOut=el('div',{style:'margin-top:8px;font-size:10px;word-break:break-all;background:#fff;border:1px solid #ddd;border-radius:4px;padding:6px;max-height:200px;overflow-y:auto;display:none'});
+    var rawBtn=btn('Inspect raw ESPN scoreboard data',function(){
+      rawOut.style.display='block';
+      rawOut.textContent='Fetching…';
+      fetch(ESPN_URL).then(function(r){return r.json();}).then(function(data){
+        var ev=data.events&&data.events[0];
+        var comp=ev&&ev.competitions&&ev.competitions[0];
+        var c1=comp&&comp.competitors&&comp.competitors[0];
+        if(c1){
+          // Show the full competitor object structure
+          var out='EVENT ID: '+(ev.id||'none')+'\n\n';
+          out+='COMPETITOR KEYS: '+Object.keys(c1).join(', ')+'\n\n';
+          out+='ATHLETE KEYS: '+(c1.athlete?Object.keys(c1.athlete).join(', '):'none')+'\n\n';
+          out+='STATUS: '+JSON.stringify(c1.status||'none')+'\n\n';
+          out+='LINESCORES: '+JSON.stringify(c1.linescores||'none')+'\n\n';
+          out+='SCORE: '+JSON.stringify(c1.score||'none')+'\n\n';
+          out+='STATISTICS[0]: '+JSON.stringify((c1.statistics&&c1.statistics[0])||'none')+'\n\n';
+          // Also try best ball endpoint
+          rawOut.textContent=out;
+          // Fetch best ball endpoint too
+          if(liveEventId&&c1.athlete&&c1.athlete.id){
+            var bbUrl='https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/'+liveEventId+'/competitions/'+liveEventId+'/competitors?limit=3&lang=en&region=us';
+            fetch(bbUrl).then(function(r2){return r2.json();}).then(function(d2){
+              rawOut.textContent+='\n--- CORE API ---\n'+JSON.stringify(d2).slice(0,1000);
+            }).catch(function(e){rawOut.textContent+='\n--- CORE API ERROR: '+e;});
+          }
+        } else {
+          rawOut.textContent='No competitor data found. Raw: '+JSON.stringify(data).slice(0,500);
+        }
+      }).catch(function(e){rawOut.textContent='Error: '+e;});
+    },'');
+    rawBtn.style.cssText='font-size:11px;padding:4px 10px;margin-top:4px;';
+    dbgCard.appendChild(rawBtn);
+    dbgCard.appendChild(rawOut);
     app.appendChild(dbgCard);
   }
 
