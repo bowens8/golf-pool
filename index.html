@@ -2341,7 +2341,10 @@ function renderBestBallScorecard(app,playerName){
   });
   var roundNums=Object.keys(roundSet).map(Number).sort(function(a,b){return a-b;});
   if(!roundNums.length){
-    app.appendChild(el('p',{class:'small-muted',style:'margin:4px 0',text:'Hole-by-hole data loading once the tournament is underway\u2026'}));
+    var loadMsg=liveEventId?
+      'Hole-by-hole data is being fetched — will populate shortly once the round is underway.':
+      'Best ball data loads once ESPN has the current tournament active. Check back Thursday morning.';
+    app.appendChild(el('p',{class:'small-muted',style:'margin:4px 0;font-style:italic',text:loadMsg}));
     return;
   }
   roundNums.forEach(function(rn){
@@ -3047,7 +3050,7 @@ function fetchLiveScores(){
           if(!isNaN(num)){scores[key]=num;names[key]=nm;}
           var sType=(c.status&&c.status.type)||{};
           var statusDesc=sType.description||'';
-          var statusDetail=sType.detail||'';
+          var statusDetail=sType.detail||sType.shortDetail||(c.status&&c.status.displayClock)||'';
           var ls=c.linescores||[];
           var todayRaw=ls.length?(ls[ls.length-1].displayValue||''):'';
           var country=(c.athlete&&((c.athlete.flag&&c.athlete.flag.alt)||c.athlete.citizenship))||'';
@@ -3062,6 +3065,10 @@ function fetchLiveScores(){
     // Trigger best ball data fetch if that game is enabled
     if(state&&state.games&&state.games.bestBall&&state.games.bestBall.enabled){
       scheduleBestBallFetch();
+      // Also try immediately if we just got an event ID for the first time
+      if(liveEventId&&Object.keys(liveHoleScores).length===0){
+        fetchBestBallData();
+      }
     }
   }).catch(function(err){
     liveError=err;
@@ -3074,41 +3081,69 @@ function scheduleBestBallFetch(){
   bestBallFetchTimer=setTimeout(fetchBestBallData,500);
 }
 
+function parseHoleData(rounds,key){
+  rounds.forEach(function(round){
+    var rn=round.id||round.number||round.roundId;
+    if(!rn) return;
+    var holes=round.linescores||[];
+    if(!holes.length) return;
+    var strokes=holes.map(function(h){var v=typeof h.value==='number'?h.value:parseInt(h.value,10);return isNaN(v)?null:v;});
+    var par=holes.map(function(h){var p=typeof h.par==='number'?h.par:parseInt(h.par,10);return isNaN(p)?4:p;});
+    var scoreTypes=holes.map(function(h){return(h.scoreType&&h.scoreType.name)||'';});
+    if(strokes.filter(function(s){return s!==null;}).length>0){
+      if(!liveHoleScores[key]) liveHoleScores[key]={};
+      liveHoleScores[key][rn]={strokes:strokes,par:par,scoreTypes:scoreTypes};
+    }
+  });
+}
+
 function fetchBestBallData(){
   if(!liveEventId||!state) return;
-  // Get all drafted golfers that have an athlete ID
   var drafted=draftedNames();
   if(!drafted.length) return;
+  var draftedKeys=drafted.map(normName);
   var season=liveSeason;
-  var promises=drafted.map(function(golfer){
-    var key=normName(golfer);
+
+  // Strategy 1: ESPN PGA summary endpoint (same CORS policy as scoreboard, no subdomain issue)
+  // Returns all competitors with hole-by-hole data in one request
+  var summaryUrl='https://site.api.espn.com/apis/site/v2/sports/golf/pga/summary?event='+liveEventId;
+  fetch(summaryUrl).then(function(r){return r.json();}).then(function(data){
+    var comps=(data.leaderboard&&data.leaderboard.competitors)||
+              data.competitors||
+              (data.events&&data.events[0]&&data.events[0].competitions&&
+               data.events[0].competitions[0]&&data.events[0].competitions[0].competitors)||[];
+    var foundHoles=false;
+    comps.forEach(function(c){
+      var nm=c.athlete&&(c.athlete.displayName||c.athlete.fullName);
+      if(!nm) return;
+      var key=normName(nm);
+      if(draftedKeys.indexOf(key)===-1) return;
+      var rounds=c.rounds||[];
+      if(rounds.length){parseHoleData(rounds,key);foundHoles=true;}
+    });
+    if(foundHoles){
+      saveBBHistory();
+      if(state&&(localView==='leaderboard'||presenterMode)) render();
+    } else {
+      fetchBestBallPerPlayer(draftedKeys,season);
+    }
+  }).catch(function(){fetchBestBallPerPlayer(draftedKeys,season);});
+}
+
+function fetchBestBallPerPlayer(draftedKeys,season){
+  // Strategy 2: per-player endpoint on site.api.espn.com (not web subdomain)
+  var promises=draftedKeys.map(function(key){
     var athleteId=liveAthleteIds[key];
-    if(!athleteId) return Promise.resolve();
-    var url='https://site.web.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard/'+liveEventId+'/playersummary?season='+season+'&player='+athleteId;
+    if(!athleteId||!liveEventId) return Promise.resolve();
+    var url='https://site.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard/'+liveEventId+'/playersummary?season='+season+'&player='+athleteId;
     return fetch(url).then(function(r){return r.json();}).then(function(data){
-      // Parse rounds[].linescores[] - each linescore is one hole
-      var rounds=data.rounds||[];
-      if(!rounds.length&&data.athlete) rounds=data.athlete.rounds||[];
-      liveHoleScores[key]={};
-      rounds.forEach(function(round){
-        var roundNum=round.id||round.number||round.roundId;
-        if(!roundNum) return;
-        var strokes=[],par=[],scoreTypes=[];
-        (round.linescores||[]).forEach(function(ls){
-          var v=typeof ls.value==='number'?ls.value:parseInt(ls.value,10);
-          var p=typeof ls.par==='number'?ls.par:parseInt(ls.par,10);
-          var st=(ls.scoreType&&ls.scoreType.name)||'';
-          strokes.push(isNaN(v)?null:v);
-          par.push(isNaN(p)?4:p);
-          scoreTypes.push(st);
-        });
-        if(strokes.length) liveHoleScores[key][roundNum]={strokes:strokes,par:par,scoreTypes:scoreTypes};
-      });
+      var rounds=data.rounds||(data.athlete&&data.athlete.rounds)||(data.competitor&&data.competitor.rounds)||[];
+      if(rounds.length) parseHoleData(rounds,key);
     }).catch(function(){});
   });
   Promise.all(promises).then(function(){
-    saveBBHistory(); // persist hole scores to Firebase so they survive reloads
-    if(state&&(localView==='leaderboard'||localView==='money')) render();
+    saveBBHistory();
+    if(state&&(localView==='leaderboard'||presenterMode)) render();
   });
 }
 
