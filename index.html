@@ -1952,6 +1952,7 @@ function renderDraft(app){
     }
     app.appendChild(pc);
     var available=state.golfers.filter(function(g){return allTaken.indexOf(g)===-1;});
+    var isMyTurn=isCommissioner||(draftIdentity&&draftIdentity===state.players[onClockIdx]);
 
     // Commissioner manual pick override
     if(isCommissioner){
@@ -1999,23 +2000,31 @@ function renderDraft(app){
 
     var card=el('div',{class:'card'});
     var search=el('input',{type:'text',placeholder:'Search golfer'});
-    // Restore search value from before re-render so typing isn't interrupted
     if(draftSearchValue) search.value=draftSearchValue;
+    if(!isMyTurn) search.style.display='none'; // hide search if not your turn
     card.appendChild(search);
     var list=el('div',{class:'scrolly',style:'margin-top:8px'});
     card.appendChild(list);app.appendChild(card);
     function renderMainList(f){
       list.innerHTML='';
+      if(!isMyTurn){
+        // Not your turn — show waiting state
+        var whosTurn=state.players[onClockIdx];
+        var waitEl=el('div',{style:'text-align:center;padding:20px 12px'});
+        waitEl.appendChild(el('p',{style:'font-size:15px;color:var(--ink-soft);margin:0 0 6px',text:'\u23f3 Waiting for '+whosTurn+' to pick\u2026'}));
+        if(!draftIdentity) waitEl.appendChild(el('p',{class:'small-muted',style:'font-size:12px',text:'Log in as '+whosTurn+' using the Player login button to make picks when it\'s your turn.'}));
+        list.appendChild(waitEl);
+        return;
+      }
       available.filter(function(g){return g.toLowerCase().indexOf(f.toLowerCase())>-1;}).forEach(function(g){
         var b=el('button',{type:'button',class:'golfer-btn',text:g});
-        // Immediate visual feedback on touchstart (before the 300ms click fires)
         b.addEventListener('touchstart',function(){b.classList.add('tapped');},{passive:true});
         b.addEventListener('touchend',function(){b.classList.remove('tapped');},{passive:true});
         b.addEventListener('click',function(){
           if(pickInProgress) return;
           if(state.clockPaused&&!isCommissioner) return;
           pickInProgress=true;
-          draftSearchValue=''; // clear search so next player starts fresh
+          draftSearchValue='';
           list.classList.add('pick-processing');
           state.picks.push({player:state.players[onClockIdx],golfer:g});
           state.clockStartedAt=Date.now();
@@ -2027,8 +2036,7 @@ function renderDraft(app){
         list.appendChild(b);
       });
       if(state.clockPaused&&!isCommissioner){
-        var pausedNote=el('p',{class:'small-muted',style:'text-align:center;padding:12px',text:'\u23f8 Draft is paused by the commissioner.'});
-        list.appendChild(pausedNote);
+        list.appendChild(el('p',{class:'small-muted',style:'text-align:center;padding:12px',text:'\u23f8 Draft is paused by the commissioner.'}));
       }
     }
     renderMainList(draftSearchValue); // render with preserved filter
@@ -2043,6 +2051,7 @@ function renderDraft(app){
     pc2.appendChild(el('p',{style:'font-size:12px;color:var(--ink-soft);margin:4px 0 0',text:'Alt only counts if a golfer WDs before the tournament and the commissioner activates it.'}));
     app.appendChild(pc2);
     var available2=state.golfers.filter(function(g){return allTaken.indexOf(g)===-1;});
+    var isMyAltTurn=isCommissioner||(draftIdentity&&draftIdentity===altPlayer);
     var card2=el('div',{class:'card'});
     var search2=el('input',{type:'text',placeholder:'Search golfer'});
     card2.appendChild(search2);
@@ -2050,6 +2059,12 @@ function renderDraft(app){
     card2.appendChild(list2);app.appendChild(card2);
     function renderAltList(f){
       list2.innerHTML='';
+      if(!isMyAltTurn){
+        var waitEl2=el('div',{style:'text-align:center;padding:20px 12px'});
+        waitEl2.appendChild(el('p',{style:'font-size:15px;color:var(--ink-soft);margin:0',text:'\u23f3 Waiting for '+altPlayer+' to pick their alt\u2026'}));
+        list2.appendChild(waitEl2);
+        return;
+      }
       available2.filter(function(g){return g.toLowerCase().indexOf(f.toLowerCase())>-1;}).forEach(function(g){
         var b=el('button',{type:'button',class:'golfer-btn',text:g});
         b.addEventListener('click',function(){state.alts[altPlayer]=g;saveState();render();});
