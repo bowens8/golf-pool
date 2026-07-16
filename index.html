@@ -785,7 +785,7 @@ function normalizeState(s){
   if(!s.queues||typeof s.queues!=='object'||Array.isArray(s.queues)) s.queues={};
   if(!s.queuePasswords||typeof s.queuePasswords!=='object'||Array.isArray(s.queuePasswords)) s.queuePasswords={};
   if(!s.playerGames||typeof s.playerGames!=='object'||Array.isArray(s.playerGames)) s.playerGames={};
-  if(typeof s.pickClockSeconds!=='number'||s.pickClockSeconds<10) s.pickClockSeconds=90;
+  if(typeof s.pickClockSeconds!=='number'||s.pickClockSeconds<15||s.pickClockSeconds>21600) s.pickClockSeconds=90;
   if(typeof s.clockStartedAt!=='number'&&s.clockStartedAt!==null) s.clockStartedAt=null;
   if(typeof s.clockPaused!=='boolean') s.clockPaused=false;
   if(typeof s.clockPauseRemaining!=='number'&&s.clockPauseRemaining!==null) s.clockPauseRemaining=null;
@@ -1300,7 +1300,37 @@ function renderSetup(app){
     scard.appendChild(settingRow('Players in pool',state.numPlayers,2,10,function(v){if(v<state.players.length){alert('Remove players first.');return;}state.numPlayers=v;saveState();render();}));
     scard.appendChild(settingRow('Golfers per team',state.rosterSize,1,80,function(v){if(v<state.topScores) state.topScores=v;state.rosterSize=v;saveState();render();}));
     scard.appendChild(settingRow('Top scores that count',state.topScores,1,state.rosterSize,function(v){state.topScores=v;saveState();render();}));
-    scard.appendChild(settingRow('Pick clock (seconds)',state.pickClockSeconds,15,600,function(v){state.pickClockSeconds=v;saveState();render();}));
+    // Pick clock — direct input, 15 seconds to 6 hours (21600 seconds)
+    var clockRow=el('div',{class:'row-flex',style:'margin-bottom:10px'});
+    clockRow.appendChild(el('span',{style:'flex:1;font-size:14px',text:'Pick clock'}));
+    var clockRight=el('div',{style:'display:flex;align-items:center;gap:6px'});
+    var clockInp=el('input',{type:'number',min:'15',max:'21600',step:'1',style:'width:80px;text-align:right'});
+    clockInp.value=state.pickClockSeconds;
+    clockInp.addEventListener('change',function(){
+      var v=parseInt(this.value,10);
+      if(isNaN(v)) return;
+      v=Math.max(15,Math.min(21600,v));
+      this.value=v;
+      state.pickClockSeconds=v;saveState();render();
+    });
+    // Helper to show human-readable time
+    function fmtClock(s){
+      if(s<60) return s+'s';
+      if(s<3600) return Math.floor(s/60)+'m '+(s%60>0?s%60+'s':'');
+      var h=Math.floor(s/3600);var m=Math.floor((s%3600)/60);
+      return h+'h'+(m>0?' '+m+'m':'');
+    }
+    var clockHint=el('span',{class:'small-muted',style:'font-size:12px;min-width:52px',text:fmtClock(state.pickClockSeconds)});
+    clockInp.addEventListener('input',function(){
+      var v=parseInt(this.value,10);
+      if(!isNaN(v)&&v>=15&&v<=21600) clockHint.textContent=fmtClock(v);
+    });
+    clockRight.appendChild(clockInp);
+    clockRight.appendChild(el('span',{class:'small-muted',text:'sec'}));
+    clockRight.appendChild(clockHint);
+    clockRow.appendChild(clockRight);
+    scard.appendChild(clockRow);
+    scard.appendChild(el('p',{class:'small-muted',style:'margin:-4px 0 8px;font-size:11.5px',text:'Range: 15 seconds to 6 hours (21600 sec). Common: 90s, 120s, 300s (5 min), 3600 (1 hr).'}));
     app.appendChild(scard);
 
     // ── Games ──
