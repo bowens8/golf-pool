@@ -2722,8 +2722,21 @@ function renderBets(app){
   var myIdentity=renderPlayerIdentityBar(app);
 
   var challenges=state.challenges||[];
+
+  // Auto-expire pending bets past their deadline
+  var now=Date.now();
+  var needsSave=false;
+  challenges.forEach(function(ch,i){
+    if(ch.status==='pending'&&ch.deadline&&now>new Date(ch.deadline).getTime()){
+      state.challenges[i].status='expired';
+      needsSave=true;
+    }
+  });
+  if(needsSave){saveState();}
+
   var active=challenges.filter(function(c){return c.status==='active';});
   var pending=challenges.filter(function(c){return c.status==='pending';});
+  var expired=challenges.filter(function(c){return c.status==='expired';});
   var declined=challenges.filter(function(c){return c.status==='declined';});
 
   // ── Money summary (public) ──
@@ -2767,6 +2780,14 @@ function renderBets(app){
       var tg=el('div',{class:'bet-golfer',style:'text-align:right'});tg.appendChild(el('div',{class:'bowner',text:ch.to}));tg.appendChild(el('div',{text:ch.toGolfer}));
       vs.appendChild(tg);card.appendChild(vs);
       card.appendChild(el('div',{class:'bet-meta',html:'<strong>$'+ch.amount+' bet</strong>'}));
+      // Deadline countdown
+      if(ch.deadline){
+        var dlMs=new Date(ch.deadline).getTime()-now;
+        var dlText=dlMs>0?
+          (dlMs>3600000?Math.ceil(dlMs/3600000)+'h to accept':Math.ceil(dlMs/60000)+'m to accept'):
+          'Deadline passed';
+        card.appendChild(el('p',{style:'font-size:11.5px;color:'+(dlMs>0?'var(--masters-gold)':'#b0413e')+';margin-top:4px',text:'\u23f0 '+dlText}));
+      }
       if(isTarget){
         var btnRow=el('div',{class:'row-flex',style:'margin-top:10px'});
         var accBtn=btn('Accept',function(){
@@ -2872,12 +2893,25 @@ function renderBets(app){
     app.appendChild(decList);
   }
 
-  // ── New challenge form ──
+  // ── Expired challenges ──
+  if(expired.length){
+    var expLabel=el('p',{class:'small-muted',style:'margin:6px 2px 4px;cursor:pointer',text:'\u25b6 '+expired.length+' expired bet'+(expired.length>1?'s':'')});
+    var expList=el('div',{style:'display:none'});
+    expLabel.addEventListener('click',function(){var open=expList.style.display==='block';expList.style.display=open?'none':'block';expLabel.textContent=(open?'\u25b6':'\u25bc')+' '+expired.length+' expired bet'+(expired.length>1?'s':'');});
+    app.appendChild(expLabel);
+    expired.forEach(function(ch){
+      var card=el('div',{class:'bet-card declined'});
+      card.appendChild(el('p',{style:'font-size:13px;margin:0',text:ch.from+' vs '+ch.to+' \u2014 '+ch.fromGolfer+' vs '+ch.toGolfer+' ($'+ch.amount+') \u2014 Expired (not accepted in time)'}));
+      if(isCommissioner){var rb=btn('Remove',function(){var idx=state.challenges.findIndex(function(c){return c.id===ch.id;});if(idx>-1){state.challenges.splice(idx,1);saveState();render();}},'danger');rb.style.cssText='font-size:11px;padding:3px 8px;margin-top:6px;';card.appendChild(rb);}
+      expList.appendChild(card);
+    });
+    app.appendChild(expList);
+  }
   app.appendChild(el('label',{class:'field-label',text:'Create a new bet',style:'display:block;margin:14px 2px 8px'}));
   var form=el('div',{class:'form-section'});
 
   // State for the form
-  var fState={from:'',fromGolfer:'',to:'',toGolfer:'',amount:25,type:'remaining'};
+  var fState={from:myIdentity||'',fromGolfer:'',to:'',toGolfer:'',amount:25,type:'remaining',deadline:''};
   var formContainer=form;
 
   function rebuildForm(){
@@ -2934,12 +2968,29 @@ function renderBets(app){
     });
     r6.appendChild(tog);formContainer.appendChild(r6);
 
+    // Deadline — how long the opponent has to accept
+    var r7=el('div',{class:'form-row'});
+    r7.appendChild(el('label',{text:'Accept-by deadline (optional)'}));
+    var dlInp=el('input',{type:'datetime-local',style:'width:100%'});
+    if(fState.deadline) dlInp.value=fState.deadline;
+    dlInp.addEventListener('change',function(){fState.deadline=this.value||'';});
+    r7.appendChild(dlInp);
+    r7.appendChild(el('p',{class:'small-muted',style:'margin:4px 0 0;font-size:11.5px',text:'If not accepted by this time, the challenge expires automatically.'}));
+    formContainer.appendChild(r7);
+
     // Submit
     var ready=fState.from&&fState.fromGolfer&&fState.to&&fState.toGolfer&&fState.amount>0;
     var subBtn=btn('Send challenge \u2192',function(){
       if(!ready) return;
       if(!Array.isArray(state.challenges)) state.challenges=[];
-      state.challenges.push({id:'ch_'+Date.now(),from:fState.from,fromGolfer:fState.fromGolfer,to:fState.to,toGolfer:fState.toGolfer,amount:fState.amount,type:fState.type,status:'pending',createdAt:Date.now()});
+      state.challenges.push({
+        id:'ch_'+Date.now(),
+        from:fState.from,fromGolfer:fState.fromGolfer,
+        to:fState.to,toGolfer:fState.toGolfer,
+        amount:fState.amount,type:fState.type,
+        deadline:fState.deadline||null,
+        status:'pending',createdAt:Date.now()
+      });
       saveState();render();
     },ready?'primary full':'full');
     subBtn.disabled=!ready;
@@ -3061,19 +3112,39 @@ function renderMoney(app){
       var ptDisp=myPts?'('+myPts.total+' pts)':'(0 pts)';
       addGame(ptWinners,'points','Points '+ptDisp);
     }
-    // Side bets
+    // Side bets — proper accounting: stake is at risk, winner gets own back + opponent's
     var activeChallenges=(state.challenges||[]).filter(function(c){return c.status==='active';});
+    var myBets=activeChallenges.filter(function(c){return c.from===p||c.to===p;});
     var sideNet=0;
-    activeChallenges.forEach(function(ch){
+    myBets.forEach(function(ch){
       var leader=getBetLeader(ch);
-      if(leader==='from'&&ch.from===p) sideNet+=ch.amount;
-      else if(leader==='to'&&ch.to===p) sideNet+=ch.amount;
-      else if(leader==='from'&&ch.to===p) sideNet-=ch.amount;
-      else if(leader==='to'&&ch.from===p) sideNet-=ch.amount;
+      var iAmFrom=ch.from===p;
+      var iWin=(leader==='from'&&iAmFrom)||(leader==='to'&&!iAmFrom);
+      var iLose=(leader==='from'&&!iAmFrom)||(leader==='to'&&iAmFrom);
+      var push=leader==='push';
+      var opp=iAmFrom?ch.to:ch.from;
+      var myG=iAmFrom?ch.fromGolfer:ch.toGolfer;
+      var theirG=iAmFrom?ch.toGolfer:ch.fromGolfer;
+      var settled=!!ch.winner;
+      if(iWin){
+        // Win: profit = opponent's stake (own stake returned, net gain = ch.amount)
+        sideNet+=ch.amount;
+        lines.push({label:(settled?'\u2714 ':'')+'Won vs '+opp+' ('+myG+' v '+theirG+')',val:'+$'+ch.amount,col:'#1a5c2e'});
+      }else if(iLose){
+        // Lose: lose own stake
+        sideNet-=ch.amount;
+        lines.push({label:(settled?'\u2714 ':'')+'Lost vs '+opp+' ('+myG+' v '+theirG+')',val:'-$'+ch.amount,col:'#b0413e'});
+      }else if(push){
+        lines.push({label:'\u2714 Push vs '+opp,val:'$0',col:'var(--ink-soft)'});
+      }else{
+        // In progress — stake at risk
+        lines.push({label:'In play vs '+opp+' ('+myG+' v '+theirG+')',val:'$'+ch.amount+' at risk',col:'var(--ink-soft)'});
+      }
     });
-    if(activeChallenges.length){
-      var myBets=activeChallenges.filter(function(c){return c.from===p||c.to===p;});
-      if(myBets.length) lines.push({label:'Side bets ('+myBets.length+')',val:(sideNet>=0?'+':'')+'\$'+sideNet,col:sideNet>0?'#1a5c2e':sideNet<0?'#b0413e':'var(--ink-soft)'});
+    if(myBets.length){
+      if(sideNet!==0){
+        lines.push({label:'Side bets net',val:(sideNet>=0?'+':'')+'\$'+sideNet,col:sideNet>0?'#1a5c2e':'#b0413e'});
+      }
       net+=sideNet;
     }
     return{player:p,net:net,lines:lines};
@@ -3119,35 +3190,68 @@ function fetchLiveScores(){
           var nm=c.athlete&&(c.athlete.displayName||c.athlete.fullName);
           if(!nm) return;
           var key=normName(nm);
+
+          // Total score
           var sc=c.score;
           var num=(sc==='E')?0:parseInt(sc,10);
           if(!isNaN(num)){scores[key]=num;names[key]=nm;}
-          var sType=(c.status&&c.status.type)||{};
-          var cStatus=c.status||{};
-          var statusDesc=sType.description||'';
-          // Try every possible field ESPN might use for hole/tee-time info
-          var statusDetail=sType.detail||sType.shortDetail||cStatus.displayClock||'';
-          // Derive "Thru X" from linescores if ESPN doesn't provide it
+
+          // ESPN structure: c.linescores = [{period:1, displayValue:"-4", linescores:[{hole data}]}, {period:2,...}]
+          // The NESTED linescores are hole-by-hole — parse them directly here, no extra API call needed
           var ls=c.linescores||[];
-          var todayRaw=ls.length?(ls[ls.length-1].displayValue||''):'';
-          // If still no statusDetail and they're in progress, try to build it
-          if(!statusDetail&&statusDesc==='In Progress'&&ls.length){
-            // linescores count = rounds that have data; period = current round
-            var round=cStatus.period||ls.length;
-            statusDetail='Round '+round;
+          var todayRaw='';
+          var statusDetail='';
+          var currentRound=null;
+
+          ls.forEach(function(round){
+            var roundNum=round.period;
+            var holes=round.linescores||[];
+            if(holes.length){
+              currentRound=round;
+              // Parse hole data into liveHoleScores
+              if(roundNum){
+                var strokes=holes.map(function(h){
+                  return typeof h.value==='number'?h.value:parseInt(h.value,10)||0;
+                });
+                var par=holes.map(function(h){
+                  // Derive par: par = strokes - relative_score ("E"=0, "-1"=-1, "+1"=+1)
+                  var st=(h.scoreType&&h.scoreType.displayValue)||'E';
+                  var rel=st==='E'?0:(parseInt(st,10)||0);
+                  var v=typeof h.value==='number'?h.value:parseInt(h.value,10)||4;
+                  return v-rel;
+                });
+                var scoreTypes=holes.map(function(h){
+                  return (h.scoreType&&h.scoreType.displayValue)||'E';
+                });
+                if(!liveHoleScores[key]) liveHoleScores[key]={};
+                liveHoleScores[key][roundNum]={strokes:strokes,par:par,scoreTypes:scoreTypes};
+              }
+            }
+          });
+
+          // Derive today's score and "Thru X" from current round
+          if(currentRound){
+            todayRaw=currentRound.displayValue||'';
+            var holesPlayed=(currentRound.linescores||[]).length;
+            statusDetail=holesPlayed>=18?'F':('Thru '+holesPlayed);
+          } else if(ls.length){
+            // Has round entries but no hole data yet — scheduled/not started
+            statusDetail='Not started';
           }
+
           var country=(c.athlete&&((c.athlete.flag&&c.athlete.flag.alt)||c.athlete.citizenship))||'';
-          details[key]={statusDesc:statusDesc,statusDetail:statusDetail,todayRaw:todayRaw,country:country};
-          // Capture athlete ID — try multiple field names ESPN uses
+          details[key]={statusDesc:'',statusDetail:statusDetail,todayRaw:todayRaw,country:country};
+
+          // Athlete ID (kept for potential fallback use)
           var aid=(c.athlete&&(c.athlete.id||c.athlete.uid||c.id))||c.id||null;
           if(aid) athleteIds[key]=String(aid);
-          // Log first few for debugging
-          if(Object.keys(athleteIds).length<=3) console.log('[ESPN] Golfer:',nm,'athleteId:',aid,'statusDetail:',statusDetail,'linescore count:',ls.length);
         });
       }
     }
     console.log('[ESPN] Captured',Object.keys(athleteIds).length,'athlete IDs, eventId:',liveEventId);
     liveScores=scores;liveDisplayNames=names;liveDetails=details;liveAthleteIds=athleteIds;
+    // Hole data is now parsed from nested linescores — save it immediately
+    if(Object.keys(liveHoleScores).length>0) saveBBHistory();
     if(state&&localView==='leaderboard') render();
     if(state&&state.games&&state.games.bestBall&&state.games.bestBall.enabled){
       scheduleBestBallFetch();
