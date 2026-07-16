@@ -3038,6 +3038,7 @@ function fetchLiveScores(){
     if(ev){
       liveTournamentName=ev.name||'';
       liveEventId=ev.id||null;
+      console.log('[ESPN] Event ID:',liveEventId,'Name:',liveTournamentName);
       var comp=ev.competitions&&ev.competitions[0];
       if(comp){
         liveStatus=(comp.status&&comp.status.type&&comp.status.type.description)||'';
@@ -3049,26 +3050,35 @@ function fetchLiveScores(){
           var num=(sc==='E')?0:parseInt(sc,10);
           if(!isNaN(num)){scores[key]=num;names[key]=nm;}
           var sType=(c.status&&c.status.type)||{};
+          var cStatus=c.status||{};
           var statusDesc=sType.description||'';
-          var statusDetail=sType.detail||sType.shortDetail||(c.status&&c.status.displayClock)||'';
+          // Try every possible field ESPN might use for hole/tee-time info
+          var statusDetail=sType.detail||sType.shortDetail||cStatus.displayClock||'';
+          // Derive "Thru X" from linescores if ESPN doesn't provide it
           var ls=c.linescores||[];
           var todayRaw=ls.length?(ls[ls.length-1].displayValue||''):'';
+          // If still no statusDetail and they're in progress, try to build it
+          if(!statusDetail&&statusDesc==='In Progress'&&ls.length){
+            // linescores count = rounds that have data; period = current round
+            var round=cStatus.period||ls.length;
+            statusDetail='Round '+round;
+          }
           var country=(c.athlete&&((c.athlete.flag&&c.athlete.flag.alt)||c.athlete.citizenship))||'';
           details[key]={statusDesc:statusDesc,statusDetail:statusDetail,todayRaw:todayRaw,country:country};
-          // Capture athlete ID for best ball hole-by-hole fetches
-          if(c.athlete&&c.athlete.id) athleteIds[key]=c.athlete.id;
+          // Capture athlete ID — try multiple field names ESPN uses
+          var aid=(c.athlete&&(c.athlete.id||c.athlete.uid||c.id))||c.id||null;
+          if(aid) athleteIds[key]=String(aid);
+          // Log first few for debugging
+          if(Object.keys(athleteIds).length<=3) console.log('[ESPN] Golfer:',nm,'athleteId:',aid,'statusDetail:',statusDetail,'linescore count:',ls.length);
         });
       }
     }
+    console.log('[ESPN] Captured',Object.keys(athleteIds).length,'athlete IDs, eventId:',liveEventId);
     liveScores=scores;liveDisplayNames=names;liveDetails=details;liveAthleteIds=athleteIds;
     if(state&&localView==='leaderboard') render();
-    // Trigger best ball data fetch if that game is enabled
     if(state&&state.games&&state.games.bestBall&&state.games.bestBall.enabled){
       scheduleBestBallFetch();
-      // Also try immediately if we just got an event ID for the first time
-      if(liveEventId&&Object.keys(liveHoleScores).length===0){
-        fetchBestBallData();
-      }
+      if(liveEventId&&Object.keys(liveHoleScores).length===0) fetchBestBallData();
     }
   }).catch(function(err){
     liveError=err;
@@ -3103,15 +3113,35 @@ function fetchBestBallData(){
   if(!drafted.length) return;
   var draftedKeys=drafted.map(normName);
   var season=liveSeason;
+  console.log('[BB] Starting fetch. eventId:',liveEventId,'athletes:',Object.keys(liveAthleteIds).length,'drafted:',drafted.length);
 
-  // Strategy 1: ESPN PGA summary endpoint (same CORS policy as scoreboard, no subdomain issue)
-  // Returns all competitors with hole-by-hole data in one request
+  // Strategy 1: sports.core.api.espn.com — most granular competitor data
+  var coreUrl='https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/'+liveEventId+'/competitions/'+liveEventId+'/competitors?limit=200&lang=en&region=us';
+  fetch(coreUrl).then(function(r){return r.json();}).then(function(data){
+    var items=data.items||data.competitors||[];
+    console.log('[BB] Core API items:',items.length,'sample keys:',items[0]?Object.keys(items[0]):[]);
+    var foundHoles=false;
+    items.forEach(function(c){
+      var nm=(c.athlete&&(c.athlete.displayName||c.athlete.fullName))||c.displayName;
+      if(!nm) return;
+      var key=normName(nm);
+      if(draftedKeys.indexOf(key)===-1) return;
+      var rounds=c.rounds||c.linescores||[];
+      if(rounds.length){parseHoleData(rounds,key);foundHoles=true;}
+    });
+    if(foundHoles){saveBBHistory();if(state&&(localView==='leaderboard'||presenterMode)) render();}
+    else{console.log('[BB] No hole data in core API, trying summary');tryBBSummary(draftedKeys,season);}
+  }).catch(function(e){console.log('[BB] Core API error:',String(e));tryBBSummary(draftedKeys,season);});
+}
+
+function tryBBSummary(draftedKeys,season){
   var summaryUrl='https://site.api.espn.com/apis/site/v2/sports/golf/pga/summary?event='+liveEventId;
   fetch(summaryUrl).then(function(r){return r.json();}).then(function(data){
-    var comps=(data.leaderboard&&data.leaderboard.competitors)||
-              data.competitors||
+    console.log('[BB] Summary keys:',Object.keys(data));
+    var comps=(data.leaderboard&&data.leaderboard.competitors)||data.competitors||
               (data.events&&data.events[0]&&data.events[0].competitions&&
                data.events[0].competitions[0]&&data.events[0].competitions[0].competitors)||[];
+    console.log('[BB] Summary competitors:',comps.length,'sample:',comps[0]?Object.keys(comps[0]):[]);
     var foundHoles=false;
     comps.forEach(function(c){
       var nm=c.athlete&&(c.athlete.displayName||c.athlete.fullName);
@@ -3121,25 +3151,22 @@ function fetchBestBallData(){
       var rounds=c.rounds||[];
       if(rounds.length){parseHoleData(rounds,key);foundHoles=true;}
     });
-    if(foundHoles){
-      saveBBHistory();
-      if(state&&(localView==='leaderboard'||presenterMode)) render();
-    } else {
-      fetchBestBallPerPlayer(draftedKeys,season);
-    }
-  }).catch(function(){fetchBestBallPerPlayer(draftedKeys,season);});
+    if(foundHoles){saveBBHistory();if(state&&(localView==='leaderboard'||presenterMode)) render();}
+    else{console.log('[BB] No hole data in summary, trying per-player');fetchBestBallPerPlayer(draftedKeys,season);}
+  }).catch(function(e){console.log('[BB] Summary error:',String(e));fetchBestBallPerPlayer(draftedKeys,season);});
 }
 
 function fetchBestBallPerPlayer(draftedKeys,season){
-  // Strategy 2: per-player endpoint on site.api.espn.com (not web subdomain)
+  console.log('[BB] Per-player fetch for',draftedKeys.length,'golfers');
   var promises=draftedKeys.map(function(key){
     var athleteId=liveAthleteIds[key];
     if(!athleteId||!liveEventId) return Promise.resolve();
     var url='https://site.api.espn.com/apis/site/v2/sports/golf/pga/leaderboard/'+liveEventId+'/playersummary?season='+season+'&player='+athleteId;
     return fetch(url).then(function(r){return r.json();}).then(function(data){
+      console.log('[BB] Per-player',key,'keys:',Object.keys(data),'rounds:',(data.rounds||[]).length);
       var rounds=data.rounds||(data.athlete&&data.athlete.rounds)||(data.competitor&&data.competitor.rounds)||[];
       if(rounds.length) parseHoleData(rounds,key);
-    }).catch(function(){});
+    }).catch(function(e){console.log('[BB] Per-player fail',key,String(e));});
   });
   Promise.all(promises).then(function(){
     saveBBHistory();
