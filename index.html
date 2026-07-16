@@ -3140,9 +3140,8 @@ function renderMoney(app){
       if(!g[gameKey]||!g[gameKey].enabled) return;
       var parts=getGameParticipants(gameKey);
       if(parts.indexOf(p)===-1){
-        // Not opted in — refund their stake for this game
-        net+=g[gameKey].wager;
-        lines.push({label:label+' (not opted in \u2014 stake returned)',val:'+$'+g[gameKey].wager,col:'var(--ink-soft)'});
+        // Not opted in — they never paid a stake, nothing to add back
+        lines.push({label:label+' (not opted in)',val:'\u2014',col:'var(--ink-soft)'});
         return;
       }
       var pot=g[gameKey].wager*parts.length;
