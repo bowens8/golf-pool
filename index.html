@@ -3349,9 +3349,32 @@ function fetchLiveScores(){
           if(currentRound){
             todayRaw=currentRound.displayValue||'';
             var holesPlayed=(currentRound.linescores||[]).length;
-            statusDetail=holesPlayed>=18?'F':('Thru '+holesPlayed);
+            var roundFinished=holesPlayed>=18;
+            statusDetail=roundFinished?'F':('Thru '+holesPlayed);
+
+            // If current round is finished, look for tee time in the NEXT round
+            if(roundFinished){
+              ls.forEach(function(round){
+                if(round.period>currentRoundNum&&(!round.linescores||!round.linescores.length)){
+                  // This is today's round — check for tee time in statistics
+                  var cats=round.statistics&&round.statistics.categories;
+                  if(cats) cats.forEach(function(cat){
+                    (cat.stats||[]).forEach(function(stat){
+                      var dv=stat.displayValue||'';
+                      if(!teeTime&&dv&&(dv.indexOf('AM')>-1||dv.indexOf('PM')>-1||/\d+:\d+/.test(dv))){
+                        try{
+                          var d=new Date(dv);
+                          teeTime=!isNaN(d.getTime())?d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZoneName:'short'}):dv;
+                        }catch(e){teeTime=dv;}
+                      }
+                    });
+                  });
+                }
+              });
+              // Append tee time to status if we found one for the upcoming round
+              if(teeTime) statusDetail='F \u00b7 Tee '+teeTime;
+            }
           } else if(ls.length){
-            // In the field but not yet teed off today
             statusDetail=teeTime?('Tee '+teeTime):'Not yet started';
           }
 
