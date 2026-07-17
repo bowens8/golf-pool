@@ -1205,7 +1205,7 @@ function renderPoolSelect(app){
   // Dashboard button
   var dbBtn=btn('\uD83D\uDCCA My Picks Dashboard',function(){
     dashboardMode=true;
-    if(Object.keys(liveScores).length===0) fetchLiveScores();
+    fetchLiveScores(); // always fetch fresh when opening dashboard
     render();
   },'full');
   dbBtn.style.marginBottom='14px';
@@ -3489,7 +3489,8 @@ function fetchLiveScores(){
     liveScores=scores;liveDisplayNames=names;liveDetails=details;liveAthleteIds=athleteIds;
     // Hole data is now parsed from nested linescores — save it immediately
     if(Object.keys(liveHoleScores).length>0) saveBBHistory();
-    if(state&&localView==='leaderboard') render();
+    if(dashboardMode) render(); // refresh dashboard with latest scores
+    else if(state&&localView==='leaderboard') render();
     if(state&&state.games&&state.games.bestBall&&state.games.bestBall.enabled){
       scheduleBestBallFetch();
       if(liveEventId&&Object.keys(liveHoleScores).length===0) fetchBestBallData();
