@@ -1000,7 +1000,13 @@ function golferDetailStr(normKey){
   var d=liveDetails[normKey];
   if(!d) return '';
   var parts=[];
-  if(d.todayRaw&&d.todayRaw!=='0'&&d.todayRaw!=='') parts.push('Today: '+d.todayRaw);
+  if(d.todayRaw&&d.todayRaw!=='0'&&d.todayRaw!==''){
+    // Label with round number instead of generic "Today"
+    var rdLabel=d.roundNum?('R'+d.roundNum):('Round');
+    parts.push(rdLabel+': '+d.todayRaw);
+  }else if(d.teeTime){
+    parts.push('Tee: '+d.teeTime);
+  }
   if(d.statusDetail) parts.push(d.statusDetail);
   return parts.join(' \u00b7 ');
 }
@@ -2601,7 +2607,12 @@ function renderLeaderboard(app){
       row.appendChild(nameCell);
       var scoreCol=el('div',{style:'text-align:right;min-width:64px'});
       scoreCol.appendChild(el('div',{class:'tscore',text:formatScore(x.score)}));
-      if(d.todayRaw&&d.todayRaw!=='') scoreCol.appendChild(el('div',{class:'ttoday',text:'Rd: '+d.todayRaw}));
+      if(d.todayRaw&&d.todayRaw!==''){
+        var rdLabel=d.roundNum?('R'+d.roundNum+': '):'Rd: ';
+        scoreCol.appendChild(el('div',{class:'ttoday',text:rdLabel+d.todayRaw}));
+      }else if(d.teeTime){
+        scoreCol.appendChild(el('div',{class:'ttoday',text:'Tee: '+d.teeTime}));
+      }
       row.appendChild(scoreCol);
       tnList.appendChild(row);
     });
@@ -3288,50 +3299,64 @@ function fetchLiveScores(){
           if(!isNaN(num)){scores[key]=num;names[key]=nm;}
 
           // ESPN structure: c.linescores = [{period:1, displayValue:"-4", linescores:[{hole data}]}, {period:2,...}]
-          // The NESTED linescores are hole-by-hole — parse them directly here, no extra API call needed
           var ls=c.linescores||[];
           var todayRaw='';
           var statusDetail='';
           var currentRound=null;
+          var currentRoundNum=null;
+          var teeTime='';
 
           ls.forEach(function(round){
             var roundNum=round.period;
             var holes=round.linescores||[];
             if(holes.length){
               currentRound=round;
-              // Parse hole data into liveHoleScores
+              currentRoundNum=roundNum;
               if(roundNum){
-                var strokes=holes.map(function(h){
-                  return typeof h.value==='number'?h.value:parseInt(h.value,10)||0;
-                });
+                var strokes=holes.map(function(h){return typeof h.value==='number'?h.value:parseInt(h.value,10)||0;});
                 var par=holes.map(function(h){
-                  // Derive par: par = strokes - relative_score ("E"=0, "-1"=-1, "+1"=+1)
                   var st=(h.scoreType&&h.scoreType.displayValue)||'E';
                   var rel=st==='E'?0:(parseInt(st,10)||0);
                   var v=typeof h.value==='number'?h.value:parseInt(h.value,10)||4;
                   return v-rel;
                 });
-                var scoreTypes=holes.map(function(h){
-                  return (h.scoreType&&h.scoreType.displayValue)||'E';
-                });
+                var scoreTypes=holes.map(function(h){return (h.scoreType&&h.scoreType.displayValue)||'E';});
                 if(!liveHoleScores[key]) liveHoleScores[key]={};
                 liveHoleScores[key][roundNum]={strokes:strokes,par:par,scoreTypes:scoreTypes};
               }
+            } else {
+              // Round with no hole data — try to get tee time from its statistics
+              var cats=round.statistics&&round.statistics.categories;
+              if(cats) cats.forEach(function(cat){
+                (cat.stats||[]).forEach(function(stat){
+                  var dv=stat.displayValue||'';
+                  // Tee time looks like "7:15 AM ET" or a datetime string containing a colon
+                  if(!teeTime&&dv&&(dv.indexOf('AM')>-1||dv.indexOf('PM')>-1||dv.indexOf(':')>-1)){
+                    // Try to parse and format
+                    try{
+                      var d=new Date(dv);
+                      if(!isNaN(d.getTime())){
+                        teeTime=d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZoneName:'short'});
+                      }else{teeTime=dv;}
+                    }catch(e){teeTime=dv;}
+                  }
+                });
+              });
             }
           });
 
-          // Derive today's score and "Thru X" from current round
+          // Derive round-labeled score and status detail
           if(currentRound){
             todayRaw=currentRound.displayValue||'';
             var holesPlayed=(currentRound.linescores||[]).length;
             statusDetail=holesPlayed>=18?'F':('Thru '+holesPlayed);
           } else if(ls.length){
-            // Has round entries but no hole data yet — scheduled/not started
-            statusDetail='Not started';
+            // In the field but not yet teed off today
+            statusDetail=teeTime?('Tee '+teeTime):'Not yet started';
           }
 
           var country=(c.athlete&&((c.athlete.flag&&c.athlete.flag.alt)||c.athlete.citizenship))||'';
-          details[key]={statusDesc:'',statusDetail:statusDetail,todayRaw:todayRaw,country:country};
+          details[key]={statusDesc:'',statusDetail:statusDetail,todayRaw:todayRaw,roundNum:currentRoundNum,teeTime:teeTime,country:country};
 
           // Athlete ID (kept for potential fallback use)
           var aid=(c.athlete&&(c.athlete.id||c.athlete.uid||c.id))||c.id||null;
