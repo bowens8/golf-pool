@@ -375,6 +375,7 @@ var clockInterval=null;
 var clockExpiredForPickCount=-1;
 var pickInProgress=false; // debounce flag — prevents double-tap double-picks
 var presenterMode=false;
+var dashboardMode=false;
 var draftSearchValue='';
 var loginModalOpen=false;
 
@@ -1073,7 +1074,8 @@ function render(){
   renderPlayerBar();
   updateHeader();
   if(currentPoolId===null){
-    renderPoolSelect(app);
+    if(dashboardMode){renderDashboard(app);}
+    else{renderPoolSelect(app);}
     return;
   }
   // Presenter / TV mode — full screen overlay, skip normal UI
@@ -1108,10 +1110,139 @@ function render(){
   if(savedScroll>0) window.scrollTo(0,savedScroll);
 }
 
+function renderDashboard(app){
+  // Back button
+  var backBtn=btn('\u2039 Back to Pools',function(){dashboardMode=false;render();},'');
+  backBtn.style.cssText='font-size:13px;padding:6px 12px;margin-bottom:12px;';
+  app.appendChild(backBtn);
+
+  var h=el('div',{style:'margin:0 0 4px'});
+  h.appendChild(el('h2',{style:'font-family:\'Playfair Display\',serif;font-size:22px;margin:0 0 2px',text:'\uD83D\uDCCA My Picks Dashboard'}));
+  h.appendChild(el('p',{class:'small-muted',style:'margin:0 0 16px',text:'Your top 8 drafted golfers across all pools — live scores and hole data.'}));
+  app.appendChild(h);
+
+  // Refresh scores
+  if(Object.keys(liveScores).length===0){
+    app.appendChild(el('p',{class:'small-muted',style:'font-style:italic;margin-bottom:10px',text:'Loading live scores\u2026'}));
+  }
+
+  var poolIds=Object.keys(poolsMeta).sort(function(a,b){return(poolsMeta[a].createdAt||0)-(poolsMeta[b].createdAt||0);});
+  if(!poolIds.length){
+    app.appendChild(el('p',{class:'small-muted',text:'No pools found yet.'}));
+    return;
+  }
+
+  var anyContent=false;
+  poolIds.forEach(function(poolId){
+    var meta=poolsMeta[poolId]||{};
+    var playerName=localStorage.getItem('pool_my_name_'+(poolId||'def'))||'';
+
+    // Load pool state from localStorage cache
+    var poolState=null;
+    try{var raw=localStorage.getItem(STORAGE_KEY+'_'+poolId);if(raw) poolState=JSON.parse(raw);}catch(e){}
+    if(!poolState||!Array.isArray(poolState.picks)) return;
+
+    // Build section card for this pool
+    var section=el('div',{class:'card',style:'padding:0.85rem 1rem;margin-bottom:10px'});
+    var poolHead=el('div',{style:'display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px'});
+    poolHead.appendChild(el('span',{style:'font-family:\'Playfair Display\',serif;font-size:17px;color:var(--masters-green-dark)',text:meta.name||poolId}));
+
+    var myPicks=playerName?poolState.picks.filter(function(pk){return pk.player===playerName;}):[];
+
+    if(!playerName){
+      poolHead.appendChild(el('span',{class:'small-muted',style:'font-size:12px',text:'Not logged in'}));
+      section.appendChild(poolHead);
+      section.appendChild(el('p',{class:'small-muted',style:'font-size:12px;font-style:italic',text:'Log in as a player in this pool to see your golfers here.'}));
+      app.appendChild(section);
+      anyContent=true;
+      return;
+    }
+    if(!myPicks.length){
+      poolHead.appendChild(el('span',{class:'small-muted',style:'font-size:12px',text:playerName}));
+      section.appendChild(poolHead);
+      section.appendChild(el('p',{class:'small-muted',style:'font-size:12px;font-style:italic',text:'No picks yet.'}));
+      app.appendChild(section);
+      anyContent=true;
+      return;
+    }
+
+    poolHead.appendChild(el('span',{class:'small-muted',style:'font-size:12px',text:playerName+' \u00b7 '+myPicks.length+' picks'}));
+    section.appendChild(poolHead);
+
+    // Sort by live score, take top 8
+    var ranked=myPicks.map(function(pk){
+      var key=normName(pk.golfer);
+      return{golfer:pk.golfer,key:key,score:liveScores[key],detail:liveDetails[key]||{}};
+    }).sort(function(a,b){
+      if(a.score===undefined&&b.score===undefined) return 0;
+      if(a.score===undefined) return 1;if(b.score===undefined) return -1;
+      return a.score-b.score;
+    });
+    var top8=ranked.slice(0,8);
+
+    top8.forEach(function(g,i){
+      var d=g.detail;
+      var row=el('div',{style:'display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)'+(i===top8.length-1?';border-bottom:none':'')});
+      // Rank
+      row.appendChild(el('span',{style:'font-size:11px;color:var(--ink-soft);min-width:16px;text-align:right',text:(i+1)+''}));
+      // Name + detail
+      var left=el('div',{style:'flex:1;min-width:0'});
+      var nameLine=el('div',{style:'display:flex;align-items:center;gap:5px;flex-wrap:wrap'});
+      var flag=getFlag(d.country||'');
+      if(flag) nameLine.appendChild(el('span',{text:flag,style:'font-size:13px'}));
+      nameLine.appendChild(el('span',{style:'font-size:14px',text:g.golfer}));
+      left.appendChild(nameLine);
+      // Detail: country + round label + hole status
+      var detParts=[];
+      if(d.country) detParts.push(displayCountry(d.country));
+      if(d.todayRaw&&d.todayRaw!==''){detParts.push((d.roundNum?'R'+d.roundNum:'Rd')+': '+d.todayRaw);}
+      else if(d.teeTime){detParts.push('Tee: '+d.teeTime);}
+      if(d.statusDetail) detParts.push(d.statusDetail);
+      if(detParts.length) left.appendChild(el('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:1px',text:detParts.join(' \u00b7 ')}));
+      row.appendChild(left);
+      // Score
+      var right=el('div',{style:'text-align:right;flex-shrink:0'});
+      right.appendChild(el('div',{style:'font-family:\'Playfair Display\',serif;font-size:16px;font-weight:600',text:g.score!==undefined?formatScore(g.score):'\u2014'}));
+      row.appendChild(right);
+      section.appendChild(row);
+    });
+
+    if(ranked.length>8){
+      section.appendChild(el('p',{class:'small-muted',style:'font-size:11.5px;margin:6px 0 0;text-align:center',text:'+'+(ranked.length-8)+' more \u2014 enter pool for full team'}));
+    }
+
+    // Quick-enter button
+    var enterBtn=btn('Enter '+( meta.name||'pool'),function(){dashboardMode=false;enterPool(poolId);},'');
+    enterBtn.style.cssText='width:100%;font-size:12px;padding:6px;margin-top:8px;';
+    section.appendChild(enterBtn);
+
+    app.appendChild(section);
+    anyContent=true;
+  });
+
+  if(!anyContent){
+    app.appendChild(el('p',{class:'small-muted',text:'No pools or picks found yet.'}));
+  }
+
+  // Refresh button at bottom
+  var refBtn=btn('\u21ba Refresh scores',function(){fetchLiveScores();render();},'full');
+  refBtn.style.cssText='margin-top:8px;font-size:13px;';
+  app.appendChild(refBtn);
+}
+
 function renderPoolSelect(app){
   var h=el('div',{style:'margin:1.2rem 0 1rem'});
   h.appendChild(el('h2',{style:'font-family:\'Playfair Display\',serif;font-size:22px;margin:0 0 4px',text:'Select Your Pool'}));
   app.appendChild(h);
+
+  // Dashboard button
+  var dbBtn=btn('\uD83D\uDCCA My Picks Dashboard',function(){
+    dashboardMode=true;
+    if(Object.keys(liveScores).length===0) fetchLiveScores();
+    render();
+  },'full');
+  dbBtn.style.marginBottom='14px';
+  app.appendChild(dbBtn);
 
   if(!firebaseReady){
     app.appendChild(el('p',{class:'small-muted',text:'Firebase not configured. Running in single-pool local mode.'}));
