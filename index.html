@@ -759,6 +759,7 @@ function defaultState(){
     bestBallLineups:{},
     bbLineupLocks:{},
     stateVersion:null,
+    undoVersion:null,
     resetAt:null,
     draftScheduled:null,
     games:{
@@ -796,6 +797,7 @@ function normalizeState(s){
   if(!s.bestBallLineups||typeof s.bestBallLineups!=='object'||Array.isArray(s.bestBallLineups)) s.bestBallLineups={};
   if(!s.bbLineupLocks||typeof s.bbLineupLocks!=='object'||Array.isArray(s.bbLineupLocks)) s.bbLineupLocks={};
   if(typeof s.stateVersion!=='number'&&s.stateVersion!==null) s.stateVersion=null;
+  if(typeof s.undoVersion!=='number'&&s.undoVersion!==null) s.undoVersion=null;
   if(typeof s.resetAt!=='number'&&s.resetAt!==null) s.resetAt=null;
   if(typeof s.draftScheduled!=='string'&&s.draftScheduled!==null) s.draftScheduled=null;
   // Games — migrate from old wagerWinner/wagerScore if needed
@@ -920,26 +922,35 @@ function enterPool(poolId){
         var normalized=normalizeState(remote);
         var theirV=normalized.stateVersion||0;
         var ourV=state?(state.stateVersion||0):0;
-        var prevState=state?JSON.parse(JSON.stringify(state)):null; // snapshot before applying
+        var prevState=state?JSON.parse(JSON.stringify(state)):null;
+
         if(theirV>=ourV){
+          // Incoming state is newer — but never silently roll back picks
+          if(state&&normalized.picks.length<state.picks.length){
+            var isReset=normalized.resetAt&&(!state.resetAt||normalized.resetAt>state.resetAt);
+            var isUndo=(normalized.undoVersion||0)>(state.undoVersion||0);
+            if(!isReset&&!isUndo){
+              // Accidental rollback from a race condition — push our state back
+              setTimeout(function(){
+                if(state&&dbRef){var tw=Object.assign({},state);delete tw.view;dbRef.set(tw).catch(function(){});}
+              },300);
+              return;
+            }
+          }
           state=normalized;
           try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
         }else{
+          // Our state is newer — push ours back
           setTimeout(function(){
             if(state&&dbRef){var tw=Object.assign({},state);delete tw.view;dbRef.set(tw).catch(function(){});}
           },300);
           return;
         }
-        // Skip re-render if nothing on the current tab actually changed,
-        // or if the user is actively typing in a draft search
         if(prevState&&!shouldRerender(prevState,state)) return;
         var activeEl=document.activeElement;
         var userTypingInDraft=localView==='draft'&&activeEl&&activeEl.tagName==='INPUT'&&activeEl.type!=='checkbox';
         var picksUnchanged=state.picks.length===(prevState?prevState.picks.length:-1);
         if(userTypingInDraft&&picksUnchanged) return;
-        state=normalized;
-        try{localStorage.setItem(STORAGE_KEY+'_'+poolId,JSON.stringify(state));}catch(e){}
-      }else{
         dbRef.set(state);
       }
       render();
@@ -2289,9 +2300,9 @@ function renderDraft(app){
   }
   if(!state.locked){
     if(state.picks.length>0&&!mainDone){
-      app.appendChild(btn('Undo last pick',function(){state.picks.pop();saveState();render();},'full'));
+      app.appendChild(btn('Undo last pick',function(){state.picks.pop();state.undoVersion=Date.now();saveState();render();},'full'));
     }else if(mainDone&&!altsDone&&altsPickedSoFar>0){
-      app.appendChild(btn('Undo last alt pick',function(){var lp=altOrder[altsPickedSoFar-1];delete state.alts[state.players[lp]];saveState();render();},'full'));
+      app.appendChild(btn('Undo last alt pick',function(){var lp=altOrder[altsPickedSoFar-1];delete state.alts[state.players[lp]];state.undoVersion=Date.now();saveState();render();},'full'));
     }
   }
 }
