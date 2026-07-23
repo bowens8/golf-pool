@@ -1686,26 +1686,48 @@ function renderQueue(app){
     return;
   }
 
-  // Use the same player identity system as the header button
-  var myName=getVerifiedIdentity()||getMyName();
+  var myName;
+  if(isCommissioner){
+    // Commissioner can view and edit any player's queue — show a selector
+    var commSelCard=el('div',{class:'card'});
+    commSelCard.appendChild(el('label',{class:'field-label',text:'Viewing queue for:'}));
+    var commSel=el('select',{style:'width:100%;font-family:\'EB Garamond\',serif;font-size:16px;padding:9px 10px;border:1px solid var(--line);border-radius:5px;background:var(--cream);color:var(--ink)'});
+    commSel.appendChild(el('option',{value:'',text:'Select a player\u2026'}));
+    // Remember last selection in localStorage for convenience
+    var lastCommQueuePlayer=localStorage.getItem('commish_queue_player_'+(currentPoolId||'def'))||'';
+    state.players.forEach(function(p){
+      var o=el('option',{value:p,text:p+(state.queuePasswords&&state.queuePasswords[p]?' \uD83D\uDD12':'')});
+      if(p===lastCommQueuePlayer) o.selected=true;
+      commSel.appendChild(o);
+    });
+    commSel.addEventListener('change',function(){
+      localStorage.setItem('commish_queue_player_'+(currentPoolId||'def'),this.value);
+      render();
+    });
+    commSelCard.appendChild(commSel);
+    commSelCard.appendChild(el('p',{class:'small-muted',style:'margin:6px 0 0;font-size:12px',text:'As commissioner you can view and edit any player\'s queue and game selections without their password.'}));
+    app.appendChild(commSelCard);
+    myName=lastCommQueuePlayer&&state.players.indexOf(lastCommQueuePlayer)>-1?lastCommQueuePlayer:'';
+    if(!myName){return;}
+  }else{
+    // Regular player — use identity system
+    myName=getVerifiedIdentity()||getMyName();
+    if(!myName||state.players.indexOf(myName)===-1){
+      app.appendChild(el('p',{class:'small-muted',style:'font-style:italic',text:'Tap \u201cPlayer login\u201d in the top right to access your queue and game preferences.'}));
+      return;
+    }
+    // Password gate — only for non-commissioners
+    var hasPassword=!!(state.queuePasswords&&state.queuePasswords[myName]);
+    var authed=isQueueAuthed(myName);
+    if(hasPassword&&!authed){
+      app.appendChild(el('p',{style:'font-size:32px;text-align:center;margin:1rem 0 0.5rem',text:'\uD83D\uDD12'}));
+      app.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:18px;text-align:center;margin:0 0 8px',text:myName+'\u2019s queue is protected'}));
+      app.appendChild(el('p',{class:'small-muted',style:'text-align:center;font-style:italic',text:'Tap \u201cPlayer login\u201d in the top right and enter your password to access your queue.'}));
+      return;
+    }
+  }
+
   function saveQ(){savePlayerQueue(myName);}
-
-  if(!myName||state.players.indexOf(myName)===-1){
-    app.appendChild(el('p',{class:'small-muted',style:'font-style:italic',text:'Tap \u201cPlayer login\u201d in the top right to access your queue and game preferences.'}));
-    return;
-  }
-
-  // ── Password gate ──
-  var hasPassword=!!(state.queuePasswords&&state.queuePasswords[myName]);
-  var authed=isQueueAuthed(myName);
-
-  if(hasPassword&&!authed){
-    // Password needed — redirect to header login button
-    app.appendChild(el('p',{style:'font-size:32px;text-align:center;margin:1rem 0 0.5rem',text:'\uD83D\uDD12'}));
-    app.appendChild(el('p',{style:'font-family:\'Playfair Display\',serif;font-size:18px;text-align:center;margin:0 0 8px',text:myName+'\u2019s queue is protected'}));
-    app.appendChild(el('p',{class:'small-muted',style:'text-align:center;font-style:italic',text:'Tap \u201cPlayer login\u201d in the top right and enter your password to access your queue.'}));
-    return;
-  }
 
   // Game opt-ins
   var draftStarted=state.draftStarted||state.picks.length>0;
