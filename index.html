@@ -299,7 +299,8 @@ var liveEventId=null;
 var liveSeason=new Date().getFullYear();
 var liveHoleScores={};
 var bestBallFetchTimer=null;
-var savedBBHistory={}; // {normKey: {roundNum: {strokes,par,scoreTypes}}} — persisted in Firebase
+var savedBBHistory={};
+var lastFetchedEventId=null; // detect when a new tournament starts // {normKey: {roundNum: {strokes,par,scoreTypes}}} — persisted in Firebase
 
 function getHoleDataForRound(normKey,roundNum){
   // Live data (from ESPN this session) takes priority; fall back to saved history
@@ -309,14 +310,13 @@ function getHoleDataForRound(normKey,roundNum){
 }
 
 function saveBBHistory(){
-  if(!firebaseReady||!db||!currentPoolId) return;
-  var histRef=db.ref('pools/'+currentPoolId+'/bbHistory');
+  if(!firebaseReady||!db||!currentPoolId||!liveEventId) return;
+  var histRef=db.ref('pools/'+currentPoolId+'/bbHistory/'+liveEventId);
   Object.keys(liveHoleScores).forEach(function(key){
     Object.keys(liveHoleScores[key]).forEach(function(rn){
       var d=liveHoleScores[key][rn];
       if(d&&d.strokes&&d.strokes.length){
         histRef.child(key+'/'+rn).set(d).catch(function(){});
-        // Mirror into savedBBHistory so it's available immediately
         if(!savedBBHistory[key]) savedBBHistory[key]={};
         savedBBHistory[key][rn]=d;
       }
@@ -325,19 +325,18 @@ function saveBBHistory(){
 }
 
 function loadBBHistory(poolId){
-  if(!firebaseReady||!db||!poolId) return;
-  db.ref('pools/'+poolId+'/bbHistory').once('value').then(function(snap){
+  if(!firebaseReady||!db||!poolId||!liveEventId) return;
+  db.ref('pools/'+poolId+'/bbHistory/'+liveEventId).once('value').then(function(snap){
     var hist=snap.val()||{};
     Object.keys(hist).forEach(function(key){
       if(!savedBBHistory[key]) savedBBHistory[key]={};
       Object.keys(hist[key]).forEach(function(rn){
-        savedBBHistory[key][parseInt(rn)]=hist[key][rn];
-        // Also populate liveHoleScores if not already there
+        savedBBHistory[key][parseInt(rn,10)]=hist[key][rn];
         if(!liveHoleScores[key]) liveHoleScores[key]={};
-        if(!liveHoleScores[key][parseInt(rn)]) liveHoleScores[key][parseInt(rn)]=hist[key][rn];
+        if(!liveHoleScores[key][parseInt(rn,10)]) liveHoleScores[key][parseInt(rn,10)]=hist[key][rn];
       });
     });
-    if(state&&localView==='leaderboard') render();
+    if(state&&localView==='bestball') render();
   }).catch(function(){});
 }
 
@@ -957,8 +956,7 @@ function enterPool(poolId){
     },function(){render();});
   }
   render();
-  fetchLiveScores();
-  loadBBHistory(poolId);
+  fetchLiveScores(); // fetching scores also triggers loadBBHistory once event ID is known
 }
 
 function leavePool(){
@@ -1716,34 +1714,36 @@ function renderQueue(app){
     var gcard=el('div',{class:'card'});
     var gLabel=el('div',{style:'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px'});
     gLabel.appendChild(el('label',{class:'field-label',style:'margin:0',text:'Games you want to play'}));
-    if(draftStarted) gLabel.appendChild(el('span',{style:'font-size:11px;color:#b0413e;font-weight:600',text:'\uD83D\uDD12 Locked — draft in progress'}));
+    if(draftStarted&&!isCommissioner) gLabel.appendChild(el('span',{style:'font-size:11px;color:#b0413e;font-weight:600',text:'\uD83D\uDD12 Locked — draft in progress'}));
+    if(draftStarted&&isCommissioner) gLabel.appendChild(el('span',{style:'font-size:11px;color:var(--masters-gold)',text:'\u270e Commissioner — can still edit'}));
     gcard.appendChild(gLabel);
     var pg=state.playerGames[myName]||{};
     var gLabels={lowScore:'Low Team Score',leader:'Tournament Leader',bestBall:'Best Ball',points:'Points Leaderboard'};
+    var canEditOpts=!draftStarted||isCommissioner;
     activeGames.forEach(function(k){
-      var row=el('div',{class:'opt-row',style:draftStarted?'opacity:0.7;cursor:default':''});
+      var row=el('div',{class:'opt-row',style:canEditOpts?'':'opacity:0.7;cursor:default'});
       var cb=el('input',{type:'checkbox'});
       cb.checked=pg[k]!==false;
-      if(draftStarted){
+      if(!canEditOpts){
         cb.disabled=true;
         cb.style.cursor='not-allowed';
-      } else {
+      }else{
         cb.addEventListener('change',function(){
           if(!state.playerGames[myName]) state.playerGames[myName]={};
           state.playerGames[myName][k]=this.checked;
           saveQ();
         });
       }
-      var lbl=el('label',{style:draftStarted?'flex:1;cursor:not-allowed':'cursor:pointer;flex:1'});
+      var lbl=el('label',{style:canEditOpts?'cursor:pointer;flex:1':'flex:1;cursor:not-allowed'});
       lbl.textContent=gLabels[k]+' — $'+state.games[k].wager+'/player';
-      if(!draftStarted){
+      if(canEditOpts){
         lbl.addEventListener('click',function(){cb.checked=!cb.checked;cb.dispatchEvent(new Event('change'));});
       }
       row.appendChild(cb);row.appendChild(lbl);
       gcard.appendChild(row);
     });
-    if(draftStarted){
-      gcard.appendChild(el('p',{class:'small-muted',style:'margin-top:8px;font-size:12px',text:'Game selections were locked when the draft started. Contact the commissioner if a change is needed.'}));
+    if(draftStarted&&!isCommissioner){
+      gcard.appendChild(el('p',{class:'small-muted',style:'margin-top:8px;font-size:12px',text:'Game selections were locked when the draft started. Ask the commissioner to update if needed.'}));
     }
     app.appendChild(gcard);
   }
@@ -3393,7 +3393,15 @@ function fetchLiveScores(){
     if(ev){
       liveTournamentName=ev.name||'';
       liveEventId=ev.id||null;
-      console.log('[ESPN] Event ID:',liveEventId,'Name:',liveTournamentName);
+      // New tournament detected — wipe stale hole data from last week
+      if(liveEventId&&liveEventId!==lastFetchedEventId){
+        lastFetchedEventId=liveEventId;
+        liveHoleScores={};
+        savedBBHistory={};
+        // Load this tournament's history from Firebase (event-keyed path)
+        if(currentPoolId) loadBBHistory(currentPoolId);
+        console.log('[ESPN] New event detected:',liveEventId,'— cleared stale BB data');
+      }
       var comp=ev.competitions&&ev.competitions[0];
       if(comp){
         liveStatus=(comp.status&&comp.status.type&&comp.status.type.description)||'';
@@ -3402,17 +3410,10 @@ function fetchLiveScores(){
           if(!nm) return;
           var key=normName(nm);
 
-          // Total score
-          // Compute total score from linescore displayValues — more accurate than c.score which can lag
+          // Total score (initial from ESPN — will be overridden by computed sum below)
           var sc=c.score;
           var num=(sc==='E')?0:parseInt(sc,10);
-
-          // After processing linescores below, we'll override with computed total if available
           var computedTotal=null;
-          // Use computed total (from linescore displayValues) if available — it's always in sync
-          // with the round data and avoids the lag on c.score
-          if(computedTotal!==null) num=computedTotal;
-          if(!isNaN(num)){scores[key]=num;names[key]=nm;}
 
           // ESPN structure: c.linescores = [{period:1, displayValue:"-4", linescores:[{hole data}]}, {period:2,...}]
           var ls=c.linescores||[];
@@ -3426,12 +3427,10 @@ function fetchLiveScores(){
             var roundNum=round.period;
             var holes=round.linescores||[];
 
-            // Sum round displayValues for an accurate total score
+            // Sum each round's displayValue for an accurate total score
             if(round.displayValue){
               var rv=round.displayValue==='E'?0:parseInt(round.displayValue,10);
-              if(!isNaN(rv)){
-                computedTotal=(computedTotal===null?0:computedTotal)+rv;
-              }
+              if(!isNaN(rv)) computedTotal=(computedTotal===null?0:computedTotal)+rv;
             }
 
             if(holes.length){
@@ -3505,6 +3504,11 @@ function fetchLiveScores(){
 
           var country=(c.athlete&&((c.athlete.flag&&c.athlete.flag.alt)||c.athlete.citizenship))||'';
           details[key]={statusDesc:'',statusDetail:statusDetail,todayRaw:todayRaw,roundNum:currentRoundNum,teeTime:teeTime,country:country};
+
+          // Use sum of round displayValues as total — always in sync with hole data
+          // Fall back to c.score only if linescores had no displayValues
+          if(computedTotal!==null) num=computedTotal;
+          if(!isNaN(num)){scores[key]=num;names[key]=nm;}
 
           // Athlete ID (kept for potential fallback use)
           var aid=(c.athlete&&(c.athlete.id||c.athlete.uid||c.id))||c.id||null;
