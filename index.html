@@ -3403,8 +3403,15 @@ function fetchLiveScores(){
           var key=normName(nm);
 
           // Total score
+          // Compute total score from linescore displayValues — more accurate than c.score which can lag
           var sc=c.score;
           var num=(sc==='E')?0:parseInt(sc,10);
+
+          // After processing linescores below, we'll override with computed total if available
+          var computedTotal=null;
+          // Use computed total (from linescore displayValues) if available — it's always in sync
+          // with the round data and avoids the lag on c.score
+          if(computedTotal!==null) num=computedTotal;
           if(!isNaN(num)){scores[key]=num;names[key]=nm;}
 
           // ESPN structure: c.linescores = [{period:1, displayValue:"-4", linescores:[{hole data}]}, {period:2,...}]
@@ -3418,6 +3425,15 @@ function fetchLiveScores(){
           ls.forEach(function(round){
             var roundNum=round.period;
             var holes=round.linescores||[];
+
+            // Sum round displayValues for an accurate total score
+            if(round.displayValue){
+              var rv=round.displayValue==='E'?0:parseInt(round.displayValue,10);
+              if(!isNaN(rv)){
+                computedTotal=(computedTotal===null?0:computedTotal)+rv;
+              }
+            }
+
             if(holes.length){
               currentRound=round;
               currentRoundNum=roundNum;
