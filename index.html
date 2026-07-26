@@ -1236,6 +1236,50 @@ function renderPoolSelect(app){
     return;
   }
 
+  // Show connection status
+  if(!syncConnected&&firebaseReady){
+    var connBanner=el('div',{style:'background:#fff3e0;border:1px solid #c9a227;border-radius:6px;padding:10px 14px;margin-bottom:14px'});
+    connBanner.appendChild(el('p',{style:'margin:0 0 6px;font-size:13px;color:#7a5800;font-weight:600',text:'\u26a0\ufe0f Not connected to Firebase'}));
+    connBanner.appendChild(el('p',{style:'margin:0 0 8px;font-size:12px;color:#7a5800',text:'Your pools are stored in Firebase. If this persists, check your internet connection or try the steps below.'}));
+    var retryBtn=btn('Retry connection',function(){
+      if(db){
+        db.ref('poolsMeta').once('value').then(function(snap){
+          poolsMeta=snap.val()||{};
+          syncConnected=true;
+          render();
+        }).catch(function(e){alert('Firebase error: '+e.message);});
+      }else{
+        initFirebase();
+        setTimeout(render,2000);
+      }
+    },'primary');
+    retryBtn.style.cssText='font-size:13px;padding:7px 14px;';
+    connBanner.appendChild(retryBtn);
+    // Also offer offline fallback from localStorage
+    var offlineBtn=btn('Load from device cache',function(){
+      // Try to load any pools from localStorage
+      var found=false;
+      for(var i=0;i<localStorage.length;i++){
+        var k=localStorage.key(i);
+        if(k&&k.indexOf(STORAGE_KEY+'_')===0){
+          var pid=k.replace(STORAGE_KEY+'_','');
+          try{
+            var s=JSON.parse(localStorage.getItem(k));
+            if(s&&s.players&&s.players.length){
+              if(!poolsMeta[pid]) poolsMeta[pid]={name:'Pool (cached)',createdAt:0};
+              found=true;
+            }
+          }catch(e){}
+        }
+      }
+      if(found){render();alert('Loaded from cache. Changes won\'t sync until reconnected.');}
+      else{alert('No cached pool data found on this device.');}
+    },'');
+    offlineBtn.style.cssText='font-size:12px;padding:5px 10px;margin-top:4px;';
+    connBanner.appendChild(offlineBtn);
+    app.appendChild(connBanner);
+  }
+
   var poolIds=Object.keys(poolsMeta);
   if(!poolIds.length){
     var msg=isCommissioner?'No pools yet. Create one below.':'No pools available yet. Ask your commissioner to set one up.';
@@ -2631,7 +2675,7 @@ function renderLeaderboard(app){
     var sampleKeys=Object.keys(liveDetails).slice(0,3);
     sampleKeys.forEach(function(k){
       var d=liveDetails[k];
-      rows.push('\u2022 '+liveDisplayNames[k]+': status="'+d.statusDesc+'" detail="'+d.statusDetail+'" today="'+d.todayRaw+'"');
+      rows.push('\u2022 '+liveDisplayNames[k]+': status="'+d.statusDesc+'" detail="'+d.statusDetail+'" today="'+d.todayRaw+'" teeTime="'+(d.teeTime||'none')+'"');
     });
     // Show hole data for first drafted golfer
     var draftedKey=normName(drafted[0]);
@@ -3476,23 +3520,8 @@ function fetchLiveScores(){
                 liveHoleScores[key][roundNum]={strokes:strokes,par:par,scoreTypes:scoreTypes};
               }
             } else {
-              // Round with no hole data — try to get tee time from its statistics
-              var cats=round.statistics&&round.statistics.categories;
-              if(cats) cats.forEach(function(cat){
-                (cat.stats||[]).forEach(function(stat){
-                  var dv=stat.displayValue||'';
-                  // Tee time looks like "7:15 AM ET" or a datetime string containing a colon
-                  if(!teeTime&&dv&&(dv.indexOf('AM')>-1||dv.indexOf('PM')>-1||dv.indexOf(':')>-1)){
-                    // Try to parse and format
-                    try{
-                      var d=new Date(dv);
-                      if(!isNaN(d.getTime())){
-                        teeTime=d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZoneName:'short'});
-                      }else{teeTime=dv;}
-                    }catch(e){teeTime=dv;}
-                  }
-                });
-              });
+              // Round with no hole data yet — not started
+              // (Statistics timestamps are internal ESPN data, not tee times)
             }
           });
 
@@ -3588,16 +3617,26 @@ function fetchBestBallData(){
   var season=liveSeason;
   console.log('[BB] Starting fetch. eventId:',liveEventId,'athletes:',Object.keys(liveAthleteIds).length,'drafted:',drafted.length);
 
-  // Strategy 1: sports.core.api.espn.com — most granular competitor data
+  // Strategy 1: sports.core.api.espn.com — also try to extract tee times
   var coreUrl='https://sports.core.api.espn.com/v2/sports/golf/leagues/pga/events/'+liveEventId+'/competitions/'+liveEventId+'/competitors?limit=200&lang=en&region=us';
   fetch(coreUrl).then(function(r){return r.json();}).then(function(data){
     var items=data.items||data.competitors||[];
-    console.log('[BB] Core API items:',items.length,'sample keys:',items[0]?Object.keys(items[0]):[]);
+    // Log first item fully to discover tee time field names
+    if(items[0]) console.log('[TEE] Sample competitor fields:',JSON.stringify(items[0]).slice(0,600));
     var foundHoles=false;
     items.forEach(function(c){
       var nm=(c.athlete&&(c.athlete.displayName||c.athlete.fullName))||c.displayName;
       if(!nm) return;
       var key=normName(nm);
+      // Try every possible tee time field ESPN might use
+      var rawTee=c.teeTime||c.startTime||(c.status&&c.status.teeTime)||(c.competition&&c.competition.startDate)||'';
+      if(rawTee&&liveDetails[key]){
+        try{
+          var td=new Date(rawTee);
+          liveDetails[key].teeTime=!isNaN(td.getTime())?
+            td.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZoneName:'short'}):rawTee;
+        }catch(e){liveDetails[key].teeTime=rawTee;}
+      }
       if(draftedKeys.indexOf(key)===-1) return;
       var rounds=c.rounds||c.linescores||[];
       if(rounds.length){parseHoleData(rounds,key);foundHoles=true;}
