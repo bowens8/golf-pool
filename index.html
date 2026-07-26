@@ -893,18 +893,36 @@ function savePlayerQueue(playerName){
 function initFirebase(){
   if(!firebaseReady) return;
   try{
-    firebase.initializeApp(FIREBASE_CONFIG);
+    // Avoid "already exists" error if the script somehow runs twice
+    if(!firebase.apps||firebase.apps.length===0){
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }
     db=firebase.database();
     db.ref('poolsMeta').on('value',function(snap){
       poolsMetaConnected=true;
       syncConnected=true;
       poolsMeta=snap.val()||{};
       if(currentPoolId===null) render();
-    },function(){
+    },function(err){
+      console.warn('poolsMeta listener error:',err);
       syncConnected=false;
       render();
     });
-  }catch(e){firebaseReady=false;}
+    // Timeout fallback — if Firebase doesn't respond in 8s, unblock the UI
+    setTimeout(function(){
+      if(!poolsMetaConnected){
+        poolsMetaConnected=true; // unblock so pool select shows
+        firebaseReady=false;     // mark as offline
+        syncConnected=false;
+        render();
+      }
+    },8000);
+  }catch(e){
+    console.warn('Firebase init error:',e);
+    firebaseReady=false;
+    // Still unblock pool select so app is usable offline
+    setTimeout(function(){if(!poolsMetaConnected){poolsMetaConnected=true;render();}},500);
+  }
 }
 
 function enterPool(poolId){
