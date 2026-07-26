@@ -897,6 +897,10 @@ function initFirebase(){
       firebase.initializeApp(FIREBASE_CONFIG);
     }
     db=firebase.database();
+    db.ref('.info/connected').on('value',function(snap){
+      syncConnected=!!snap.val();
+      if(syncConnected&&currentPoolId===null) render();
+    });
     db.ref('poolsMeta').on('value',function(snap){
       syncConnected=true;
       poolsMeta=snap.val()||{};
@@ -904,10 +908,12 @@ function initFirebase(){
     },function(err){
       console.warn('poolsMeta error:',err);
       syncConnected=false;
+      render(); // show the error state
     });
   }catch(e){
     console.warn('Firebase init error:',e);
     firebaseReady=false;
+    render();
   }
 }
 
