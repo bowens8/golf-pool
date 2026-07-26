@@ -288,7 +288,7 @@ function setLocalView(v){
   try{localStorage.setItem('lv_'+(currentPoolId||'def'),v);}catch(e){}
 }
 var poolsMeta={};
-var poolsMetaConnected=false;
+var poolsMetaConnected=true; // no longer gate the UI on this — show immediately
 
 var state=null;
 var liveScores={};
@@ -893,35 +893,21 @@ function savePlayerQueue(playerName){
 function initFirebase(){
   if(!firebaseReady) return;
   try{
-    // Avoid "already exists" error if the script somehow runs twice
     if(!firebase.apps||firebase.apps.length===0){
       firebase.initializeApp(FIREBASE_CONFIG);
     }
     db=firebase.database();
     db.ref('poolsMeta').on('value',function(snap){
-      poolsMetaConnected=true;
       syncConnected=true;
       poolsMeta=snap.val()||{};
       if(currentPoolId===null) render();
     },function(err){
-      console.warn('poolsMeta listener error:',err);
+      console.warn('poolsMeta error:',err);
       syncConnected=false;
-      render();
     });
-    // Timeout fallback — if Firebase doesn't respond in 8s, unblock the UI
-    setTimeout(function(){
-      if(!poolsMetaConnected){
-        poolsMetaConnected=true; // unblock so pool select shows
-        firebaseReady=false;     // mark as offline
-        syncConnected=false;
-        render();
-      }
-    },8000);
   }catch(e){
     console.warn('Firebase init error:',e);
     firebaseReady=false;
-    // Still unblock pool select so app is usable offline
-    setTimeout(function(){if(!poolsMetaConnected){poolsMetaConnected=true;render();}},500);
   }
 }
 
@@ -1241,11 +1227,6 @@ function renderPoolSelect(app){
   if(!firebaseReady){
     app.appendChild(el('p',{class:'small-muted',text:'Firebase not configured. Running in single-pool local mode.'}));
     app.appendChild(btn('Enter pool',function(){enterPool('default-pool');},'primary full'));
-    return;
-  }
-
-  if(!poolsMetaConnected){
-    app.appendChild(el('p',{class:'small-muted',text:'Connecting to pools\u2026'}));
     return;
   }
 
